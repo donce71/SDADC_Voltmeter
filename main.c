@@ -2,8 +2,8 @@
   ******************************************************************************
   * @file    SDADC/SDADC_Voltmeter/main.c 
   * @author  Donatas
-  * @version V1.10.4
-  * @date    02-January-2018
+  * @version V1.10.5
+  * @date    03-January-2018
   * @brief   Main program body
   * Rx - PA2  TX - PA3, UART2 
   * SDADC PB2 
@@ -47,7 +47,7 @@ DMA_InitTypeDef     DMA_InitStructure;
 int16_t InjectedConvDataCh4 = 0;
 int16_t InjectedConvDataCh8 = 0;
 __IO uint32_t TimingDelay = 0;
-uint32_t PWM_PERIOD=1000;
+uint32_t PWM_PERIOD=50000;
 __IO uint16_t RegularConvData_Tab[2];
 
 /* ADC variables */
@@ -140,7 +140,7 @@ int main(void)
     Vref_itampa= (vref_internal_calibrated)*3300/ 4095; //Vidinio Vref itampa
     Vref_itampa= 1229; //Kalibruojant su PICOLOG
     
-    DUTY=25424;
+    DUTY=9800; //su 10k Vsensor yra apie 1V
     ChangePWM_duty( PWM_PERIOD/2 );
     
     /* Test DMA1 TC flag */
@@ -203,7 +203,7 @@ int main(void)
               
 /* Feedback */
 //              DUTY=PI_controller();
-//              ChangePWM_duty( PWM_PERIOD - DUTY );
+              ChangePWM_duty( PWM_PERIOD - DUTY );
              }
         }
        
@@ -610,7 +610,7 @@ void InitializeTimer(uint32_t PWM_PERIOD)
     RCC_APB1PeriphClockCmd(RCC_APB1Periph_TIM4, ENABLE);
 
     TIM_TimeBaseInitTypeDef timerInitStructure;
-    timerInitStructure.TIM_Prescaler = 4-1;
+    timerInitStructure.TIM_Prescaler = 0;
     timerInitStructure.TIM_CounterMode = TIM_CounterMode_Up;
     timerInitStructure.TIM_Period = PWM_PERIOD;
     timerInitStructure.TIM_ClockDivision = TIM_CKD_DIV1;
