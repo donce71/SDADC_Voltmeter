@@ -2,8 +2,8 @@
   ******************************************************************************
   * @file    SDADC/SDADC_Voltmeter/main.c 
   * @author  Donatas
-  * @version V1.10.5
-  * @date    03-January-2018
+  * @version V1.10.6
+  * @date    04-January-2018
   * @brief   Main program body
   * Rx - PA2  TX - PA3, UART2 
   * SDADC PB2 
@@ -79,7 +79,7 @@ uint16_t DUTY=9424;
 float Kp=0.6;
 float Ki=0.1;
 float integral=0;
-float targetVoltage=600;
+float targetVoltage=620;
 float AVG_error=0;
 int8_t flag_send=0;
 
@@ -140,7 +140,7 @@ int main(void)
     Vref_itampa= (vref_internal_calibrated)*3300/ 4095; //Vidinio Vref itampa
     Vref_itampa= 1229; //Kalibruojant su PICOLOG
     
-    DUTY=9800; //su 10k Vsensor yra apie 1V
+    //DUTY=9800; //su 10k Vsensor yra apie 1V
     ChangePWM_duty( PWM_PERIOD/2 );
     
     /* Test DMA1 TC flag */
@@ -202,7 +202,7 @@ int main(void)
 	  flag_send=1;
               
 /* Feedback */
-//              DUTY=PI_controller();
+              DUTY=PI_controller();
               ChangePWM_duty( PWM_PERIOD - DUTY );
              }
         }
@@ -211,8 +211,8 @@ int main(void)
       if (flag_send==1){
 	/*integerPart = (int)AVG_VrefMv;
 	decimalPart = ((int)(AVG_VrefMv*N_DECIMAL_POINTS_PRECISION)%N_DECIMAL_POINTS_PRECISION);
-	Post_office( integerPart,decimalPart,(VDD_ref-3000)*100); //Paketas 1
-           */integerPart = (int)AVG_VsensorMv;
+	Post_office( integerPart,decimalPart,DUTY); //Paketas 1
+            */integerPart = (int)AVG_VsensorMv;
 	decimalPart = ((int)(AVG_VsensorMv*N_DECIMAL_POINTS_PRECISION)%N_DECIMAL_POINTS_PRECISION);
 	Post_office( integerPart,decimalPart,DUTY); //Paketas 2
 	flag_send=0;
