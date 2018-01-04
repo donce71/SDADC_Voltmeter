@@ -8,11 +8,11 @@
   * Rx - PA2  TX - PA3, UART2 
   * SDADC PB2 
   * PWM TIM4ch4  PF6
-  * feedback with Pconst
+  * feedback with Kp and Ki
   * papildomas ADC tikslumui
   * Vyto vidurkinmo metodas
   * Letas matavimas
-  * siuncia po 4sps, svyruoja per apie 0.3mV, VDD +-20mV itakos matavimui neturi
+  * siuncia po 4sps, svyruoja per 0.3mV, VDD +-20mV itakos matavimui neturi
   * trumpalaikis iki 50s matavimas telpa 0.1mV diapazone matuojant baterija
   * PWM period atskaitu 50k  0.066mV step   Periodas yra 1.28Khz , magistrale Timer yra 64Mhz
   * DMA
@@ -118,7 +118,6 @@ int main(void)
   
   RCC_ClocksTypeDef RCC_Clocks;
 
-  
   /*!< At this stage the microcontroller clock setting is already configured, 
        this is done through SystemInit() function which is called from startup
        file (startup_stm32f37x.s) before to branch to application main.
@@ -129,35 +128,33 @@ int main(void)
   RCC_GetClocksFreq(&RCC_Clocks);
   SysTick_Config(RCC_Clocks.HCLK_Frequency / 1000);
   
-    GPIO_init();
-    USART2_Configuration();
-    InitializeTimer(PWM_PERIOD);
-    InitializePWMChannel();
-    ADC_init();
-    RS485(TRANSMIT);
+  GPIO_init();
+  USART2_Configuration();
+  InitializeTimer(PWM_PERIOD);
+  InitializePWMChannel();
+  ADC_init();
+  RS485(TRANSMIT);
     
-    vref_internal_calibrated = *((uint16_t *)(VREF_INTERNAL_BASE_ADDRESS)); //ADC reiksme kai Vdd=3.3V
-    Vref_itampa= (vref_internal_calibrated)*3300/ 4095; //Vidinio Vref itampa
-    Vref_itampa= 1229; //Kalibruojant su PICOLOG
+  vref_internal_calibrated = *((uint16_t *)(VREF_INTERNAL_BASE_ADDRESS)); //ADC reiksme kai Vdd=3.3V
+  Vref_itampa= (vref_internal_calibrated)*3300/ 4095; //Vidinio Vref itampa
+  Vref_itampa= 1229; //Kalibruojant su PICOLOG
     
-    //DUTY=9800; //su 10k Vsensor yra apie 1V
-    ChangePWM_duty( PWM_PERIOD/2 );
+  //DUTY=9800; //su 10k Vsensor yra apie 1V
+  ChangePWM_duty( PWM_PERIOD/2 );
     
-    /* Test DMA1 TC flag */
-    while((DMA_GetFlagStatus(DMA1_FLAG_TC1)) == RESET ); 
+  /* Test DMA1 TC flag */
+  while((DMA_GetFlagStatus(DMA1_FLAG_TC1)) == RESET ); 
     
-    /* Clear DMA TC flag */
-    DMA_ClearFlag(DMA1_FLAG_TC1);
+  /* Clear DMA TC flag */
+  DMA_ClearFlag(DMA1_FLAG_TC1);
 
-  /* SDADC1 channel4P (in Single Ended Zero Reference mode) configuration using
-     injected conversion with continuous mode enabled */
+  /* SDADC1 */
   if(SDADC1_Config() != 0)
-  {
-    /* Forever loop */
-    while(1);
+  {    while(1);     /* Forever loop */
   }
   else
   {
+	  
    while (1)
     {
 /* SAR ADC with thermocompensation*/
@@ -199,9 +196,8 @@ int main(void)
               AVG_VrefMv= sumatorius2/10;  
               sumatorius2=0;
               sumavimo_index2=0;
-	  flag_send=1;
-              
-/* Feedback */
+	          flag_send=1;
+/* Feedback: DUTY keiciu tik kas 100 matavimu, nes naudoju Vref AVG reiksme, kuri kinta tik cia if*/
               DUTY=PI_controller();
               ChangePWM_duty( PWM_PERIOD - DUTY );
              }
@@ -217,7 +213,7 @@ int main(void)
 	Post_office( integerPart,decimalPart,DUTY); //Paketas 2
 	flag_send=0;
       }
-      Delay(2);
+      Delay(2); //_____________________________________DEMESIO
     }
   }
 }
@@ -231,7 +227,7 @@ float PI_controller()
   
   error=targetVoltage-AVG_VrefMv;
   AVG_error=AVG_error+(AVG_error-error)/10;
-  integral = integral + (error* 4); //reikia padauginti is iteration period
+  integral = integral + (error* 4); //reikia padauginti is iteration period______DEMESIO!!!!!!!!!!!!!!!!
   output= (Kp*error+Ki*integral);
   
   if( output > PWM_PERIOD )
@@ -536,14 +532,6 @@ void ADC_init(  )
   ADC_Cmd(ADC1, ENABLE);     
 }
 
-void ADC_measure (){    //nenaudojama
-    ADC_SoftwareStartConv(ADC1);
-    while(ADC_GetFlagStatus(ADC1, ADC_FLAG_EOC) == RESET);
-      ADC1ConvertedValue[0] =ADC_GetConversionValue(ADC1);
-    while(ADC_GetFlagStatus(ADC1, ADC_FLAG_EOC) == RESET);
-      ADC1ConvertedValue[1] =ADC_GetConversionValue(ADC1);
-}
-
 float termocompensation(uint16_t ADC_Vtemp, uint16_t ADC_Vref){ //grazina ADC_Vref_kompensuotas
     float ADC_Vref_komp;
     ADC_Vref_komp=(float)ADC_Vref + (-0.0245)*(float)ADC_Vtemp + (0.000014 * (float)(ADC_Vtemp*ADC_Vtemp)); 
@@ -636,7 +624,6 @@ void InitializePWMChannel()
 void ChangePWM_duty( uint16_t PULSE )
 {
 TIM4->CCR4=PULSE;
-
 }
 
 void RS485(uint8_t direction){
