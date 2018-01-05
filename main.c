@@ -205,14 +205,14 @@ int main(void)
        
 /* Transmit */
       if (flag_send==1){
-        	//Post_office( 0,0,0); //Zymi paketu siuntimo pradzia
+        	Post_office( 0,0,0); //Zymi paketu siuntimo pradzia
+
 	integerPart = (int)AVG_VrefMv;
 	decimalPart = ((int)(AVG_VrefMv*N_DECIMAL_POINTS_PRECISION)%N_DECIMAL_POINTS_PRECISION);
 	Post_office( integerPart,decimalPart,DUTY); //Paketas 1
-            /*integerPart = (int)AVG_VsensorMv;
+            integerPart = (int)AVG_VsensorMv;
 	decimalPart = ((int)(AVG_VsensorMv*N_DECIMAL_POINTS_PRECISION)%N_DECIMAL_POINTS_PRECISION);
 	Post_office( integerPart,decimalPart,(AVG_VDD_ref-3000)*100); //Paketas 2
-	*/
             flag_send=0;
       }
       Delay(2); //_____________________________________DEMESIO
