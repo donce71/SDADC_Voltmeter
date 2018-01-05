@@ -2,8 +2,8 @@
   ******************************************************************************
   * @file    SDADC/SDADC_Voltmeter/main.c 
   * @author  Donatas
-  * @version V1.10.6
-  * @date    04-January-2018
+  * @version V1.10.7
+  * @date    05-January-2018
   * @brief   Main program body
   * Rx - PA2  TX - PA3, UART2 
   * SDADC PB2 
@@ -196,7 +196,7 @@ int main(void)
               AVG_VrefMv= sumatorius2/10;  
               sumatorius2=0;
               sumavimo_index2=0;
-	          flag_send=1;
+	  flag_send=1;
 /* Feedback: DUTY keiciu tik kas 100 matavimu, nes naudoju Vref AVG reiksme, kuri kinta tik cia if*/
               DUTY=PI_controller();
               ChangePWM_duty( PWM_PERIOD - DUTY );
@@ -205,13 +205,15 @@ int main(void)
        
 /* Transmit */
       if (flag_send==1){
-	/*integerPart = (int)AVG_VrefMv;
+        	//Post_office( 0,0,0); //Zymi paketu siuntimo pradzia
+	integerPart = (int)AVG_VrefMv;
 	decimalPart = ((int)(AVG_VrefMv*N_DECIMAL_POINTS_PRECISION)%N_DECIMAL_POINTS_PRECISION);
 	Post_office( integerPart,decimalPart,DUTY); //Paketas 1
-            */integerPart = (int)AVG_VsensorMv;
+            /*integerPart = (int)AVG_VsensorMv;
 	decimalPart = ((int)(AVG_VsensorMv*N_DECIMAL_POINTS_PRECISION)%N_DECIMAL_POINTS_PRECISION);
-	Post_office( integerPart,decimalPart,DUTY); //Paketas 2
-	flag_send=0;
+	Post_office( integerPart,decimalPart,(AVG_VDD_ref-3000)*100); //Paketas 2
+	*/
+            flag_send=0;
       }
       Delay(2); //_____________________________________DEMESIO
     }
