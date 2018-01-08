@@ -2,8 +2,8 @@
   ******************************************************************************
   * @file    SDADC/SDADC_Voltmeter/main.c 
   * @author  Donatas
-  * @version V1.10.7
-  * @date    05-January-2018
+  * @version V1.10.8
+  * @date    08-January-2018
   * @brief   Main program body
   * Rx - PA2  TX - PA3, UART2 
   * SDADC PB2 
@@ -64,6 +64,8 @@ float AVG_VDD_ref=0;
 float Voltage_buffer[10] = {0};
 float Voltage_buffer2[10] = {0};
 float Voltage_of_10=0;
+uint16_t ADC_Vtemp=0; uint16_t ADC_Vref=0;
+
 /* Vidurkinimo variables */
 uint16_t sumavimo_index1=0; 
 uint16_t kaupimo_index1=0; 
@@ -158,7 +160,9 @@ int main(void)
    while (1)
     {
 /* SAR ADC with thermocompensation*/
-       VDD_ref=(4095*Vref_itampa)/termocompensation(RegularConvData_Tab[1], RegularConvData_Tab[0]);
+       ADC_Vref=RegularConvData_Tab[0];
+       ADC_Vtemp=RegularConvData_Tab[1];
+       VDD_ref=(4095.0*Vref_itampa)/termocompensation(RegularConvData_Tab[1], RegularConvData_Tab[0]);
        AVG_VDD_ref=VDD_ref;
 
 /* Compute the input voltage */       
@@ -205,7 +209,7 @@ int main(void)
        
 /* Transmit */
       if (flag_send==1){
-        	Post_office( 0,0,0); //Zymi paketu siuntimo pradzia
+        	Post_office( ADC_Vref,ADC_Vtemp,(AVG_VDD_ref*1000)); //Zymi paketu siuntimo pradzia
 
 	integerPart = (int)AVG_VrefMv;
 	decimalPart = ((int)(AVG_VrefMv*N_DECIMAL_POINTS_PRECISION)%N_DECIMAL_POINTS_PRECISION);
