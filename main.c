@@ -2,8 +2,8 @@
   ******************************************************************************
   * @file    SDADC/SDADC_Voltmeter/main.c 
   * @author  Donatas
-  * @version V1.10.8
-  * @date    08-January-2018
+  * @version V1.10.10
+  * @date    09-January-2018
   * @brief   Main program body
   * Rx - PA2  TX - PA3, UART2 
   * SDADC PB2 
@@ -60,11 +60,11 @@ uint16_t vref_internal_calibrated = 0;
 
 float Vref_itampa=0;
 float VDD_ref=0;
-float AVG_VDD_ref=0;
+float AVG_VDD_ref=3300;
 float Voltage_buffer[10] = {0};
 float Voltage_buffer2[10] = {0};
 float Voltage_of_10=0;
-uint16_t ADC_Vtemp=0; uint16_t ADC_Vref=0;
+float ADC_Vtemp=0; float ADC_Vref=0;
 
 /* Vidurkinimo variables */
 uint16_t sumavimo_index1=0; 
@@ -81,7 +81,8 @@ uint16_t DUTY=9424;
 float Kp=0.6;
 float Ki=0.1;
 float integral=0;
-float targetVoltage=620;
+float targetVoltage=0;
+float targetVref_mazas=0;
 float AVG_error=0;
 int8_t flag_send=0;
 
@@ -100,12 +101,14 @@ void InitializePWMChannel(void);
 void ADC_init( void );
 void ADC_measure (void);
 float Get_8of10AVG(float buffer[]);
-float termocompensation(uint16_t ADC_Vtemp, uint16_t ADC_Vref);
+float termocompensation(float Vtemp, float Vref);
+
 
 
 void Post_office( uint16_t v1, uint16_t v2, uint16_t v3);
 void ChangePWM_duty( uint16_t PULSE );
 float PI_controller(void);
+float V_target_computation(float vref, float Vdd3V3);
 
 
 /* Private functions ---------------------------------------------------------*/
@@ -139,7 +142,10 @@ int main(void)
     
   vref_internal_calibrated = *((uint16_t *)(VREF_INTERNAL_BASE_ADDRESS)); //ADC reiksme kai Vdd=3.3V
   Vref_itampa= (vref_internal_calibrated)*3300/ 4095; //Vidinio Vref itampa
-  Vref_itampa= 1229; //Kalibruojant su PICOLOG
+  Vref_itampa= 1229;                // Kalibruojant su PICOLOG
+  targetVref_mazas=-0.159;          //  mazojo Vref tikslas
+
+  
     
   //DUTY=9800; //su 10k Vsensor yra apie 1V
   ChangePWM_duty( PWM_PERIOD/2 );
@@ -156,15 +162,18 @@ int main(void)
   }
   else
   {
-	  
+/* INIT values*/
+   ADC_Vref =RegularConvData_Tab[0]; 
+   ADC_Vtemp=RegularConvData_Tab[1]; 
+    
    while (1)
     {
 /* SAR ADC with thermocompensation*/
-       ADC_Vref=RegularConvData_Tab[0];
+       ADC_Vref=ADC_Vref+((float)(RegularConvData_Tab[0])-ADC_Vref)/10.0; // vidurkinu  is 100
        ADC_Vtemp=RegularConvData_Tab[1];
-       VDD_ref=(4095.0*Vref_itampa)/termocompensation(RegularConvData_Tab[1], RegularConvData_Tab[0]);
-       AVG_VDD_ref=VDD_ref;
-
+       VDD_ref=(4095.0*Vref_itampa)/termocompensation(ADC_Vtemp, ADC_Vref);
+       AVG_VDD_ref=VDD_ref; 
+       
 /* Compute the input voltage */       
       VsensorMv = (((InjectedConvDataCh4 + 32768) * AVG_VDD_ref) / (SDADC_GAIN *K_GAIN * SDADC_RESOL));
       VrefMv = (((InjectedConvDataCh8 + 32768) * AVG_VDD_ref) / (SDADC_GAIN *K_GAIN * SDADC_RESOL));
@@ -202,6 +211,7 @@ int main(void)
               sumavimo_index2=0;
 	  flag_send=1;
 /* Feedback: DUTY keiciu tik kas 100 matavimu, nes naudoju Vref AVG reiksme, kuri kinta tik cia if*/
+              targetVoltage = V_target_computation( targetVref_mazas, AVG_VDD_ref);
               DUTY=PI_controller();
               ChangePWM_duty( PWM_PERIOD - DUTY );
              }
@@ -209,14 +219,20 @@ int main(void)
        
 /* Transmit */
       if (flag_send==1){
-        	Post_office( ADC_Vref,ADC_Vtemp,(AVG_VDD_ref*1000)); //Zymi paketu siuntimo pradzia
+        	Post_office( ADC_Vref,ADC_Vtemp,(VDD_ref-3000)*100); //paketas 1
 
-	integerPart = (int)AVG_VrefMv;
+	/*integerPart = (int)AVG_VrefMv;
 	decimalPart = ((int)(AVG_VrefMv*N_DECIMAL_POINTS_PRECISION)%N_DECIMAL_POINTS_PRECISION);
-	Post_office( integerPart,decimalPart,DUTY); //Paketas 1
+	Post_office( integerPart,decimalPart,DUTY); //Paketas 2
+            
             integerPart = (int)AVG_VsensorMv;
 	decimalPart = ((int)(AVG_VsensorMv*N_DECIMAL_POINTS_PRECISION)%N_DECIMAL_POINTS_PRECISION);
-	Post_office( integerPart,decimalPart,(AVG_VDD_ref-3000)*100); //Paketas 2
+	Post_office( integerPart,decimalPart,(AVG_VDD_ref-3000)*100); //Paketas 3
+            
+            integerPart = (int)targetVoltage;
+	decimalPart = ((int)(targetVoltage*N_DECIMAL_POINTS_PRECISION)%N_DECIMAL_POINTS_PRECISION);           
+            Post_office( integerPart,decimalPart,(VDD_ref-3000)*100); //paketas 4
+            */
             flag_send=0;
       }
       Delay(2); //_____________________________________DEMESIO
@@ -247,6 +263,30 @@ float PI_controller()
   }*/
 
   return output; 
+}
+
+float V_target_computation(float vref, float Vdd3V3) //vref norimas mazasis vref, VISI SKAICIAVIAMAI VOLTAIS
+{ 
+  float Vddminus=0;
+  float Vpwm=0;
+  float r0=240;
+  float r1=1200;
+  float r2=2400;
+  float t1=0;
+  float t2=0;
+  float t3=0;
+
+  //Apskaiciuoju minusine VDD
+  Vddminus=(Vdd3V3*-2.3944+4628.7)/1000;
+  
+  //Apskaicuoju Vref didiji target
+  /*t1= ( vref*r0-Vddminus*r0  ) * ( (r1*r2/r0) +r1+r2 )  ;
+  t2=(r0*r2)  - (  r1*(Vddminus)/r0  ) + Vddminus;
+  t3=  ( vref*r0-Vddminus*r0  ) * ( (r1*r2/r0) +r1+r2 )    /  (r0*r2)  ;
+  */
+  Vpwm= (  ( ( vref*r0-Vddminus*r0  ) * ( (r1*r2/r0) +r1+r2 )  )  /  (r0*r2)  ) - (  r1*(-Vddminus)/r0  ) + Vddminus;
+
+  return (Vpwm*1000); 
 }
 
 void Post_office( uint16_t v1, uint16_t v2, uint16_t v3){
@@ -538,9 +578,9 @@ void ADC_init(  )
   ADC_Cmd(ADC1, ENABLE);     
 }
 
-float termocompensation(uint16_t ADC_Vtemp, uint16_t ADC_Vref){ //grazina ADC_Vref_kompensuotas
+float termocompensation(float Vtemp, float Vref){ //grazina ADC_Vref_kompensuotas
     float ADC_Vref_komp;
-    ADC_Vref_komp=(float)ADC_Vref + (-0.0245)*(float)ADC_Vtemp + (0.000014 * (float)(ADC_Vtemp*ADC_Vtemp)); 
+    ADC_Vref_komp=(float)Vref + (-0.0245)*(float)Vtemp + (0.000014 * (float)(Vtemp*Vtemp)); 
   return ADC_Vref_komp;
 }
 
