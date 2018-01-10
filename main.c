@@ -169,7 +169,7 @@ int main(void)
    while (1)
     {
 /* SAR ADC with thermocompensation*/
-       ADC_Vref=ADC_Vref+((float)(RegularConvData_Tab[0])-ADC_Vref)/10.0; // vidurkinu  is 100
+       ADC_Vref=RegularConvData_Tab[0]; 
        ADC_Vtemp=RegularConvData_Tab[1];
        VDD_ref=(4095.0*Vref_itampa)/termocompensation(ADC_Vtemp, ADC_Vref);
        AVG_VDD_ref=VDD_ref; 
@@ -221,7 +221,7 @@ int main(void)
       if (flag_send==1){
         	Post_office( ADC_Vref,ADC_Vtemp,(VDD_ref-3000)*100); //paketas 1
 
-	/*integerPart = (int)AVG_VrefMv;
+	integerPart = (int)AVG_VrefMv;
 	decimalPart = ((int)(AVG_VrefMv*N_DECIMAL_POINTS_PRECISION)%N_DECIMAL_POINTS_PRECISION);
 	Post_office( integerPart,decimalPart,DUTY); //Paketas 2
             
@@ -231,8 +231,8 @@ int main(void)
             
             integerPart = (int)targetVoltage;
 	decimalPart = ((int)(targetVoltage*N_DECIMAL_POINTS_PRECISION)%N_DECIMAL_POINTS_PRECISION);           
-            Post_office( integerPart,decimalPart,(VDD_ref-3000)*100); //paketas 4
-            */
+            Post_office( integerPart,decimalPart,0); //paketas 4
+            
             flag_send=0;
       }
       Delay(2); //_____________________________________DEMESIO
@@ -580,7 +580,8 @@ void ADC_init(  )
 
 float termocompensation(float Vtemp, float Vref){ //grazina ADC_Vref_kompensuotas
     float ADC_Vref_komp;
-    ADC_Vref_komp=(float)Vref + (-0.0245)*(float)Vtemp + (0.000014 * (float)(Vtemp*Vtemp)); 
+    //ADC_Vref_komp=(float)Vref + (-0.0245)*(float)Vtemp + (0.000014 * (float)(Vtemp*Vtemp)); 
+     ADC_Vref_komp=(float)Vref*0.995 + (-0.003)*(float)Vtemp + (0.000005 * (float)(Vtemp*Vtemp)); 
   return ADC_Vref_komp;
 }
 
