@@ -2,8 +2,8 @@
   ******************************************************************************
   * @file    SDADC/SDADC_Voltmeter/main.c 
   * @author  Donatas
-  * @version V1.10.11
-  * @date    11-January-2018
+  * @version V1.10.12
+  * @date    12-January-2018
   * @brief   Main program body
   * Rx - PA2  TX - PA3, UART2 
   * SDADC PB2 
@@ -143,12 +143,11 @@ int main(void)
   vref_internal_calibrated = *((uint16_t *)(VREF_INTERNAL_BASE_ADDRESS)); //ADC reiksme kai Vdd=3.3V
   Vref_itampa= (vref_internal_calibrated)*3300/ 4095; //Vidinio Vref itampa
   Vref_itampa= 1229;                // Kalibruojant su PICOLOG
-  //targetVref_mazas=-0.159;          //  mazojo Vref tikslas
-  targetVoltage=2669;
+  targetVref_mazas=150;          
+  targetVoltage=targetVref_mazas*17.3;
+  //targetVoltage=620;
 
   
-    
-  DUTY=40000; 
   ChangePWM_duty( PWM_PERIOD/2 );
     
   /* Test DMA1 TC flag */
@@ -212,23 +211,22 @@ int main(void)
               sumavimo_index2=0;
 	  flag_send=1;
 /* Feedback: DUTY keiciu tik kas 100 matavimu, nes naudoju Vref AVG reiksme, kuri kinta tik cia if*/
-              //targetVoltage = V_target_computation( targetVref_mazas, AVG_VDD_ref);
-              //DUTY=PI_controller();
+              DUTY=PI_controller();
               ChangePWM_duty( PWM_PERIOD - DUTY );
              }
         }
        
 /* Transmit */
       if (flag_send==1){
-        	//Post_office( ADC_Vref,ADC_Vtemp,(VDD_ref-3000)*100); //paketas 1
+        	Post_office( ADC_Vref,ADC_Vtemp,(VDD_ref-3000)*100); //paketas 1
 
 	integerPart = (int)AVG_VrefMv;
 	decimalPart = ((int)(AVG_VrefMv*N_DECIMAL_POINTS_PRECISION)%N_DECIMAL_POINTS_PRECISION);
-	Post_office( integerPart,decimalPart,DUTY); //Paketas 2
+	Post_office( integerPart,decimalPart,0); //Paketas 2
             
             integerPart = (int)AVG_VsensorMv;
 	decimalPart = ((int)(AVG_VsensorMv*N_DECIMAL_POINTS_PRECISION)%N_DECIMAL_POINTS_PRECISION);
-	//Post_office( integerPart,decimalPart,(AVG_VDD_ref-3000)*100); //Paketas 3
+	Post_office( integerPart,decimalPart,DUTY); //Paketas 3
             
             /*integerPart = (int)targetVoltage;
 	decimalPart = ((int)(targetVoltage*N_DECIMAL_POINTS_PRECISION)%N_DECIMAL_POINTS_PRECISION);           
