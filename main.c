@@ -3,7 +3,7 @@
   * @file    SDADC/SDADC_Voltmeter/main.c 
   * @author  Donatas
   * @version V1.10.12
-  * @date    12-January-2018
+  * @date    15-January-2018
   * @brief   Main program body
   * Rx - PA2  TX - PA3, UART2 
   * SDADC PB2 
@@ -18,6 +18,7 @@
   * DMA
   * Termocompensation 
   * 2017-12-18 Second SDADC for signal
+  * 2018-01-15 Third SDADC for Vref
   ******************************************************************************
   */
 
@@ -172,10 +173,11 @@ int main(void)
        ADC_Vref=RegularConvData_Tab[0]; 
        ADC_Vtemp=RegularConvData_Tab[1];
        VDD_ref=(4095.0*Vref_itampa)/termocompensation(ADC_Vtemp, ADC_Vref);
-       AVG_VDD_ref=VDD_ref; 
        
-/* Compute the input voltage */       
-      VsensorMv = (((InjectedConvDataCh4 + 32768) * AVG_VDD_ref) / (SDADC_GAIN *K_GAIN * SDADC_RESOL));
+/* Compute the input voltage */   
+       AVG_VDD_ref = (InjectedConvDataCh4+32768);
+       //AVG_VDD_ref = 2500*(SDADC_GAIN *K_GAIN * SDADC_RESOL) / (InjectedConvDataCh4+32768);
+      //VsensorMv = (((InjectedConvDataCh4 + 32768) * AVG_VDD_ref) / (SDADC_GAIN *K_GAIN * SDADC_RESOL));
       VrefMv = (((InjectedConvDataCh8 + 32768) * AVG_VDD_ref) / (SDADC_GAIN *K_GAIN * SDADC_RESOL));
       
 /* vidurkinimas Vsensor*/
@@ -220,12 +222,12 @@ int main(void)
       if (flag_send==1){
         	Post_office( ADC_Vref,ADC_Vtemp,(VDD_ref-3000)*100); //paketas 1
 
-	integerPart = (int)AVG_VrefMv;
+	/*integerPart = (int)AVG_VrefMv;
 	decimalPart = ((int)(AVG_VrefMv*N_DECIMAL_POINTS_PRECISION)%N_DECIMAL_POINTS_PRECISION);
 	Post_office( integerPart,decimalPart,0); //Paketas 2
-            
-            integerPart = (int)AVG_VsensorMv;
-	decimalPart = ((int)(AVG_VsensorMv*N_DECIMAL_POINTS_PRECISION)%N_DECIMAL_POINTS_PRECISION);
+            */
+            integerPart = (int)AVG_VDD_ref;
+	decimalPart = ((int)(AVG_VDD_ref*N_DECIMAL_POINTS_PRECISION)%N_DECIMAL_POINTS_PRECISION);
 	Post_office( integerPart,decimalPart,DUTY); //Paketas 3
             
             /*integerPart = (int)targetVoltage;
