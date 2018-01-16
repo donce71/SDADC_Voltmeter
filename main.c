@@ -2,8 +2,8 @@
   ******************************************************************************
   * @file    SDADC/SDADC_Voltmeter/main.c 
   * @author  Donatas
-  * @version V1.10.12
-  * @date    15-January-2018
+  * @version V1.10.13
+  * @date    16-January-2018
   * @brief   Main program body
   * Rx - PA2  TX - PA3, UART2 
   * SDADC PB2 
@@ -18,7 +18,7 @@
   * DMA
   * Termocompensation 
   * 2017-12-18 Second SDADC for signal
-  * 2018-01-15 Third SDADC for Vref
+  * 2018-01-16 Thermokompensations
   ******************************************************************************
   */
 
@@ -59,13 +59,16 @@ float AVG_VsensorMv=0;
 __IO uint16_t  ADC1ConvertedValue[2] = {0,0};
 uint16_t vref_internal_calibrated = 0;
 
-float Vref_itampa=0;
+float Vref_internal_itampa=0;
 float VDD_ref=0;
 float AVG_VDD_ref=3300;
 float Voltage_buffer[10] = {0};
 float Voltage_buffer2[10] = {0};
 float Voltage_of_10=0;
 float ADC_Vtemp=0; float ADC_Vref=0;
+float temp=0;
+float new_temp=0;
+float External_Vref=0;
 
 /* Vidurkinimo variables */
 uint16_t sumavimo_index1=0; 
@@ -91,7 +94,6 @@ int8_t flag_send=0;
 uint32_t kintamasis=0;
 
 
-
 /* Private function prototypes -----------------------------------------------*/
 static uint32_t SDADC1_Config(void);
 void USART2_Configuration(void);
@@ -102,9 +104,9 @@ void InitializePWMChannel(void);
 void ADC_init( void );
 void ADC_measure (void);
 float Get_8of10AVG(float buffer[]);
-float termocompensation(float Vtemp, float Vref);
-
-
+float termocompensation(float Vtemp);
+float temperature(float ADC_vdd, float ADC_temperature);
+float thermo_Vref(float temperatura_degree);
 
 void Post_office( uint16_t v1, uint16_t v2, uint16_t v3);
 void ChangePWM_duty( uint16_t PULSE );
@@ -121,7 +123,6 @@ float V_target_computation(float vref, float Vdd3V3);
   */
 int main(void)
 {
-  
   RCC_ClocksTypeDef RCC_Clocks;
 
   /*!< At this stage the microcontroller clock setting is already configured, 
@@ -142,9 +143,9 @@ int main(void)
   RS485(TRANSMIT);
     
   vref_internal_calibrated = *((uint16_t *)(VREF_INTERNAL_BASE_ADDRESS)); //ADC reiksme kai Vdd=3.3V
-  Vref_itampa= (vref_internal_calibrated)*3300/ 4095; //Vidinio Vref itampa
-  Vref_itampa= 1229;                // Kalibruojant su PICOLOG
-  targetVref_mazas=150;          
+  Vref_internal_itampa= (vref_internal_calibrated)*3300/ 4095; //Vidinio Vref itampa
+  Vref_internal_itampa= 1229;                // Kalibruojant su PICOLOG
+  targetVref_mazas=130;          
   targetVoltage=targetVref_mazas*17.3;
   //targetVoltage=620;
 
@@ -162,21 +163,22 @@ int main(void)
   {    while(1);     /* Forever loop */
   }
   else
-  {
-/* INIT values*/
-   ADC_Vref =RegularConvData_Tab[0]; 
-   ADC_Vtemp=RegularConvData_Tab[1]; 
-    
+  {    
    while (1)
     {
-/* SAR ADC with thermocompensation*/
+/* SAR ADC */
        ADC_Vref=RegularConvData_Tab[0]; 
        ADC_Vtemp=RegularConvData_Tab[1];
-       VDD_ref=(4095.0*Vref_itampa)/termocompensation(ADC_Vtemp, ADC_Vref);
+/* Thermocompensations */       
+       Vref_internal_itampa=termocompensation(ADC_Vtemp); 
+       VDD_ref=4095.0*(Vref_internal_itampa/ADC_Vref);
+       new_temp=temperature(VDD_ref,ADC_Vtemp);                 // atiduoda laipsnius
+       temp=temp+(new_temp-temp)/100;
+       External_Vref = thermo_Vref(temp);
        
 /* Compute the input voltage */   
-       AVG_VDD_ref = (InjectedConvDataCh4+32768);
-       //AVG_VDD_ref = 2500*(SDADC_GAIN *K_GAIN * SDADC_RESOL) / (InjectedConvDataCh4+32768);
+       //AVG_VDD_ref = (InjectedConvDataCh4+32768);
+       AVG_VDD_ref = External_Vref*(SDADC_GAIN *K_GAIN * SDADC_RESOL) / (InjectedConvDataCh4+32768);
       //VsensorMv = (((InjectedConvDataCh4 + 32768) * AVG_VDD_ref) / (SDADC_GAIN *K_GAIN * SDADC_RESOL));
       VrefMv = (((InjectedConvDataCh8 + 32768) * AVG_VDD_ref) / (SDADC_GAIN *K_GAIN * SDADC_RESOL));
       
@@ -222,18 +224,18 @@ int main(void)
       if (flag_send==1){
         	Post_office( ADC_Vref,ADC_Vtemp,(VDD_ref-3000)*100); //paketas 1
 
-	/*integerPart = (int)AVG_VrefMv;
+	integerPart = (int)AVG_VrefMv;
 	decimalPart = ((int)(AVG_VrefMv*N_DECIMAL_POINTS_PRECISION)%N_DECIMAL_POINTS_PRECISION);
-	Post_office( integerPart,decimalPart,0); //Paketas 2
-            */
+	Post_office( integerPart,decimalPart,temp*100); //Paketas 2
+            
             integerPart = (int)AVG_VDD_ref;
 	decimalPart = ((int)(AVG_VDD_ref*N_DECIMAL_POINTS_PRECISION)%N_DECIMAL_POINTS_PRECISION);
 	Post_office( integerPart,decimalPart,DUTY); //Paketas 3
             
-            /*integerPart = (int)targetVoltage;
-	decimalPart = ((int)(targetVoltage*N_DECIMAL_POINTS_PRECISION)%N_DECIMAL_POINTS_PRECISION);           
+            integerPart = (int)External_Vref;
+	decimalPart = ((int)(External_Vref*N_DECIMAL_POINTS_PRECISION)%N_DECIMAL_POINTS_PRECISION);           
             Post_office( integerPart,decimalPart,0); //paketas 4
-            */
+            
             flag_send=0;
       }
       Delay(2); //_____________________________________DEMESIO
@@ -247,7 +249,6 @@ float PI_controller()
   float error=0;
   float skirtumas=0;
 
-  
   error=targetVoltage-AVG_VrefMv;
   AVG_error=AVG_error+(AVG_error-error)/10;
   integral = integral + (error* 4); //reikia padauginti is iteration period______DEMESIO!!!!!!!!!!!!!!!!
@@ -266,7 +267,7 @@ float PI_controller()
   return output; 
 }
 
-float V_target_computation(float vref, float Vdd3V3) //vref norimas mazasis vref, VISI SKAICIAVIAMAI VOLTAIS
+float V_target_computation(float vref, float Vdd3V3) //_______________________cia minusiniam Vref (nereikalingas dar)
 { 
   float Vddminus=0;
   float Vpwm=0;
@@ -579,11 +580,25 @@ void ADC_init(  )
   ADC_Cmd(ADC1, ENABLE);     
 }
 
-float termocompensation(float Vtemp, float Vref){ //grazina ADC_Vref_kompensuotas
-    float ADC_Vref_komp;
+float termocompensation(float ADC_temperature){ //is ADC_temp gauna internal Vref itampa mV
+    float result;
+    result= -0.00007*ADC_temperature*ADC_temperature + 0.1935*ADC_temperature + 1103.9;
     //ADC_Vref_komp=(float)Vref + (-0.0245)*(float)Vtemp + (0.000014 * (float)(Vtemp*Vtemp)); 
-     ADC_Vref_komp=(float)Vref*0.995 + (-0.003)*(float)Vtemp + (0.000005 * (float)(Vtemp*Vtemp)); 
-  return ADC_Vref_komp;
+  return result;
+}
+
+float temperature(float ADC_vdd, float ADC_temperature){ //______________________Pataisyti
+    float tempe_degree;
+    float tempe_mV;
+    tempe_mV=(ADC_vdd/4095)*ADC_temperature; 
+    tempe_degree=-0.0008*tempe_mV*tempe_mV + 1.7501*tempe_mV - 872.8 ; 
+  return tempe_degree;
+}
+
+float thermo_Vref(float temperatura_degree){ //______________________Pataisyti
+    float result;
+    result = temperatura_degree*0.0668+2484.9;
+  return result;
 }
 
 float Get_8of10AVG(float buffer[] )
