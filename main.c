@@ -2,8 +2,8 @@
   ******************************************************************************
   * @file    SDADC/SDADC_Voltmeter/main.c 
   * @author  Donatas
-  * @version V1.10.13
-  * @date    16-January-2018
+  * @version V1.11.
+  * @date    23-January-2018
   * @brief   Main program body
   * Rx - PA2  TX - PA3, UART2 
   * SDADC PB2 
@@ -19,6 +19,7 @@
   * Termocompensation 
   * 2017-12-18 Second SDADC for signal
   * 2018-01-16 Thermokompensations
+  * 2018-01-23 Third SDADC for reference 
   ******************************************************************************
   */
 
@@ -47,6 +48,8 @@ DMA_InitTypeDef     DMA_InitStructure;
 /* Private variables ---------------------------------------------------------*/
 int16_t InjectedConvDataCh4 = 0;
 int16_t InjectedConvDataCh8 = 0;
+int16_t InjectedConvDataCh7 = 0;
+
 __IO uint32_t TimingDelay = 0;
 uint32_t PWM_PERIOD=50000;
 __IO uint16_t RegularConvData_Tab[2];
@@ -141,11 +144,12 @@ int main(void)
   InitializePWMChannel();
   ADC_init();
   RS485(TRANSMIT);
+  GPIO_SetBits(GPIOB, GPIO_Pin_4); // Multiplexer for negative offset
     
   vref_internal_calibrated = *((uint16_t *)(VREF_INTERNAL_BASE_ADDRESS)); //ADC reiksme kai Vdd=3.3V
   Vref_internal_itampa= (vref_internal_calibrated)*3300/ 4095; //Vidinio Vref itampa
   Vref_internal_itampa= 1229;                // Kalibruojant su PICOLOG
-  targetVref_mazas=130;          
+  targetVref_mazas=115;          
   targetVoltage=targetVref_mazas*17.3;
   //targetVoltage=620;
 
@@ -174,12 +178,12 @@ int main(void)
        VDD_ref=4095.0*(Vref_internal_itampa/ADC_Vref);
        new_temp=temperature(VDD_ref,ADC_Vtemp);                 // atiduoda laipsnius
        temp=temp+(new_temp-temp)/100;
-       External_Vref = thermo_Vref(temp);
+       //External_Vref = thermo_Vref(temp);
+       External_Vref=2500;
        
 /* Compute the input voltage */   
-       //AVG_VDD_ref = (InjectedConvDataCh4+32768);
-       AVG_VDD_ref = External_Vref*(SDADC_GAIN *K_GAIN * SDADC_RESOL) / (InjectedConvDataCh4+32768);
-      //VsensorMv = (((InjectedConvDataCh4 + 32768) * AVG_VDD_ref) / (SDADC_GAIN *K_GAIN * SDADC_RESOL));
+      AVG_VDD_ref = External_Vref*(SDADC_GAIN *K_GAIN * SDADC_RESOL) / (InjectedConvDataCh7+32768);
+      VsensorMv = (((InjectedConvDataCh4 + 32768) * AVG_VDD_ref) / (SDADC_GAIN *K_GAIN * SDADC_RESOL));
       VrefMv = (((InjectedConvDataCh8 + 32768) * AVG_VDD_ref) / (SDADC_GAIN *K_GAIN * SDADC_RESOL));
       
 /* vidurkinimas Vsensor*/
@@ -222,18 +226,18 @@ int main(void)
        
 /* Transmit */
       if (flag_send==1){
-        	Post_office( ADC_Vref,ADC_Vtemp,(VDD_ref-3000)*100); //paketas 1
+        	//Post_office( ADC_Vref,ADC_Vtemp,(VDD_ref-3000)*100); //paketas 1
 
-	integerPart = (int)AVG_VrefMv;
-	decimalPart = ((int)(AVG_VrefMv*N_DECIMAL_POINTS_PRECISION)%N_DECIMAL_POINTS_PRECISION);
+	integerPart = (int)VrefMv;
+	decimalPart = ((int)(VrefMv*N_DECIMAL_POINTS_PRECISION)%N_DECIMAL_POINTS_PRECISION);
 	Post_office( integerPart,decimalPart,temp*100); //Paketas 2
             
-            integerPart = (int)AVG_VDD_ref;
-	decimalPart = ((int)(AVG_VDD_ref*N_DECIMAL_POINTS_PRECISION)%N_DECIMAL_POINTS_PRECISION);
+            integerPart = (int)VsensorMv;
+	decimalPart = ((int)(VsensorMv*N_DECIMAL_POINTS_PRECISION)%N_DECIMAL_POINTS_PRECISION);
 	Post_office( integerPart,decimalPart,DUTY); //Paketas 3
             
-            integerPart = (int)External_Vref;
-	decimalPart = ((int)(External_Vref*N_DECIMAL_POINTS_PRECISION)%N_DECIMAL_POINTS_PRECISION);           
+            integerPart = (int)AVG_VDD_ref;
+	decimalPart = ((int)(AVG_VDD_ref*N_DECIMAL_POINTS_PRECISION)%N_DECIMAL_POINTS_PRECISION);           
             Post_office( integerPart,decimalPart,0); //paketas 4
             
             flag_send=0;
@@ -397,6 +401,11 @@ static uint32_t SDADC1_Config(void)
   GPIO_InitStructure.GPIO_PuPd = GPIO_PuPd_NOPULL;
   GPIO_InitStructure.GPIO_Pin = GPIO_Pin_8;
   GPIO_Init(GPIOE, &GPIO_InitStructure);
+      /* SDADC1 channel 7P (PE9) */
+  GPIO_InitStructure.GPIO_Mode  = GPIO_Mode_AN;
+  GPIO_InitStructure.GPIO_PuPd = GPIO_PuPd_NOPULL;
+  GPIO_InitStructure.GPIO_Pin = GPIO_Pin_9;
+  GPIO_Init(GPIOE, &GPIO_InitStructure);
   
 
   /* Select External reference: The reference voltage selection is available
@@ -433,10 +442,11 @@ static uint32_t SDADC1_Config(void)
   SDADC_ChannelConfig(SDADC1, SDADC_Channel_4, SDADC_Conf_0);
     /* select SDADC1 channel 8 to use conf0 */
   SDADC_ChannelConfig(SDADC1, SDADC_Channel_8, SDADC_Conf_0);
+      /* select SDADC1 channel 7 to use conf0 */
+  SDADC_ChannelConfig(SDADC1, SDADC_Channel_7, SDADC_Conf_0);
 
-  /* select channel 4 */
-  SDADC_InjectedChannelSelect(SDADC1, SDADC_Channel_4 | SDADC_Channel_8);
-    /* select channel 8 */
+  /* select channel 4 8 7*/
+  SDADC_InjectedChannelSelect(SDADC1, SDADC_Channel_4 | SDADC_Channel_8 | SDADC_Channel_7 );
   /* Enable continuous mode */
   SDADC_InjectedContinuousModeCmd(SDADC1, ENABLE);
 
@@ -654,6 +664,17 @@ void GPIO_init(){
    GPIO_InitStructure.GPIO_Mode = GPIO_Mode_AF;
    GPIO_InitStructure.GPIO_Speed = GPIO_Speed_50MHz;
    GPIO_Init(GPIOF, &GPIO_InitStructure);
+   
+  //Multiplexer pin
+   RCC_AHBPeriphClockCmd(RCC_AHBPeriph_GPIOB, ENABLE);
+
+  GPIO_InitStructure.GPIO_Pin = GPIO_Pin_4; 
+  GPIO_InitStructure.GPIO_Speed = GPIO_Speed_Level_2;
+  GPIO_InitStructure.GPIO_Mode = GPIO_Mode_OUT;
+  GPIO_InitStructure.GPIO_OType = GPIO_OType_PP;
+  GPIO_InitStructure.GPIO_PuPd = GPIO_PuPd_NOPULL;
+  GPIO_Init(GPIOB, &GPIO_InitStructure);
+   
 }
 
 void InitializeTimer(uint32_t PWM_PERIOD)

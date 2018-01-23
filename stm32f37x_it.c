@@ -45,6 +45,7 @@
 /* Private variables ---------------------------------------------------------*/
 extern int16_t InjectedConvDataCh4;
 extern int16_t InjectedConvDataCh8;
+extern int16_t InjectedConvDataCh7;
 extern int16_t ping_pong = 0;
 
 
@@ -175,9 +176,13 @@ void SDADC1_IRQHandler(void)
     if (ping_pong==0){
     /* Get the converted value */
     InjectedConvDataCh4 = SDADC_GetInjectedConversionValue(SDADC1, &ChannelIndex);
-    ping_pong=1;
+    ping_pong+=1;
    }
     else if (ping_pong==1){
+    InjectedConvDataCh7=SDADC_GetInjectedConversionValue(SDADC1, &ChannelIndex);
+    ping_pong+=1;
+    }
+    else if (ping_pong==2){
     InjectedConvDataCh8=SDADC_GetInjectedConversionValue(SDADC1, &ChannelIndex);
     ping_pong=0;
     }
