@@ -65,6 +65,7 @@ uint16_t vref_internal_calibrated = 0;
 float Vref_internal_itampa=0;
 float VDD_ref=0;
 float AVG_VDD_ref=3300;
+float AVG_VDD_ref_NEW=3300;
 float Voltage_buffer[10] = {0};
 float Voltage_buffer2[10] = {0};
 float Voltage_of_10=0;
@@ -149,10 +150,10 @@ int main(void)
   vref_internal_calibrated = *((uint16_t *)(VREF_INTERNAL_BASE_ADDRESS)); //ADC reiksme kai Vdd=3.3V
   Vref_internal_itampa= (vref_internal_calibrated)*3300/ 4095; //Vidinio Vref itampa
   Vref_internal_itampa= 1229;                // Kalibruojant su PICOLOG
-  targetVref_mazas=115;          
-  targetVoltage=targetVref_mazas*17.3;
+  targetVref_mazas=155;          
+  targetVoltage=targetVref_mazas*11.7;
   //targetVoltage=620;
-
+  //DUTY =41820;  // su situ duty Vref yra 1091mV
   
   ChangePWM_duty( PWM_PERIOD/2 );
     
@@ -178,11 +179,11 @@ int main(void)
        VDD_ref=4095.0*(Vref_internal_itampa/ADC_Vref);
        new_temp=temperature(VDD_ref,ADC_Vtemp);                 // atiduoda laipsnius
        temp=temp+(new_temp-temp)/100;
-       //External_Vref = thermo_Vref(temp);
-       External_Vref=2500;
+       External_Vref = thermo_Vref(temp);
        
 /* Compute the input voltage */   
-      AVG_VDD_ref = External_Vref*(SDADC_GAIN *K_GAIN * SDADC_RESOL) / (InjectedConvDataCh7+32768);
+      AVG_VDD_ref_NEW = External_Vref*(SDADC_GAIN *K_GAIN * SDADC_RESOL) / (InjectedConvDataCh7+32768);
+      AVG_VDD_ref = AVG_VDD_ref + (AVG_VDD_ref_NEW - AVG_VDD_ref)/1000;
       VsensorMv = (((InjectedConvDataCh4 + 32768) * AVG_VDD_ref) / (SDADC_GAIN *K_GAIN * SDADC_RESOL));
       VrefMv = (((InjectedConvDataCh8 + 32768) * AVG_VDD_ref) / (SDADC_GAIN *K_GAIN * SDADC_RESOL));
       
@@ -226,19 +227,22 @@ int main(void)
        
 /* Transmit */
       if (flag_send==1){
-        	//Post_office( ADC_Vref,ADC_Vtemp,(VDD_ref-3000)*100); //paketas 1
+        	Post_office( ADC_Vref,ADC_Vtemp,(VDD_ref-3000)*100); //paketas 1
 
-	integerPart = (int)VrefMv;
-	decimalPart = ((int)(VrefMv*N_DECIMAL_POINTS_PRECISION)%N_DECIMAL_POINTS_PRECISION);
+	integerPart = (int)AVG_VrefMv;
+	decimalPart = ((int)(AVG_VrefMv*N_DECIMAL_POINTS_PRECISION)%N_DECIMAL_POINTS_PRECISION);
 	Post_office( integerPart,decimalPart,temp*100); //Paketas 2
             
-            integerPart = (int)VsensorMv;
-	decimalPart = ((int)(VsensorMv*N_DECIMAL_POINTS_PRECISION)%N_DECIMAL_POINTS_PRECISION);
+            integerPart = (int)AVG_VsensorMv;
+	decimalPart = ((int)(AVG_VsensorMv*N_DECIMAL_POINTS_PRECISION)%N_DECIMAL_POINTS_PRECISION);
 	Post_office( integerPart,decimalPart,DUTY); //Paketas 3
             
             integerPart = (int)AVG_VDD_ref;
 	decimalPart = ((int)(AVG_VDD_ref*N_DECIMAL_POINTS_PRECISION)%N_DECIMAL_POINTS_PRECISION);           
-            Post_office( integerPart,decimalPart,0); //paketas 4
+            Post_office( integerPart,decimalPart,(External_Vref-2000)*100); //paketas 4
+            
+            Post_office( InjectedConvDataCh4,InjectedConvDataCh7,InjectedConvDataCh8); //paketas 5
+
             
             flag_send=0;
       }
