@@ -50,7 +50,7 @@
                                                SDADC_GAIN must be updated according to
                                                POT_SDADC_GAIN */
 #define SDADC_GAIN           (float) 1  /* SDADC internal gain is set to 1: update this define*/
-#define K_GAIN               (float) 1.0239  /* Kalibravimo gain */
+#define K_GAIN               (float) 1.03  /* Kalibravimo gain, cia pagal Vref_2.5V */
 
 
 #define POT_SDADC_CHANNEL    SDADC_Channel_5

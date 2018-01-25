@@ -2,8 +2,8 @@
   ******************************************************************************
   * @file    SDADC/SDADC_Voltmeter/main.c 
   * @author  Donatas
-  * @version V1.11.
-  * @date    23-January-2018
+  * @version V1.11.2
+  * @date    25-January-2018
   * @brief   Main program body
   * Rx - PA2  TX - PA3, UART2 
   * SDADC PB2 
@@ -20,6 +20,7 @@
   * 2017-12-18 Second SDADC for signal
   * 2018-01-16 Thermokompensations
   * 2018-01-23 Third SDADC for reference 
+  * 2018-01-25 Modified SDADC
   ******************************************************************************
   */
 
@@ -73,6 +74,10 @@ float ADC_Vtemp=0; float ADC_Vref=0;
 float temp=0;
 float new_temp=0;
 float External_Vref=0;
+float step_mv_new=0;
+float step_mv=0;
+
+
 
 /* Vidurkinimo variables */
 uint16_t sumavimo_index1=0; 
@@ -150,7 +155,7 @@ int main(void)
   vref_internal_calibrated = *((uint16_t *)(VREF_INTERNAL_BASE_ADDRESS)); //ADC reiksme kai Vdd=3.3V
   Vref_internal_itampa= (vref_internal_calibrated)*3300/ 4095; //Vidinio Vref itampa
   Vref_internal_itampa= 1229;                // Kalibruojant su PICOLOG
-  targetVref_mazas=155;          
+  targetVref_mazas=132.8;          
   targetVoltage=targetVref_mazas*11.7;
   //targetVoltage=620;
   //DUTY =41820;  // su situ duty Vref yra 1091mV
@@ -182,10 +187,11 @@ int main(void)
        External_Vref = thermo_Vref(temp);
        
 /* Compute the input voltage */   
-      AVG_VDD_ref_NEW = External_Vref*(SDADC_GAIN *K_GAIN * SDADC_RESOL) / (InjectedConvDataCh7+32768);
-      AVG_VDD_ref = AVG_VDD_ref + (AVG_VDD_ref_NEW - AVG_VDD_ref)/1000;
-      VsensorMv = (((InjectedConvDataCh4 + 32768) * AVG_VDD_ref) / (SDADC_GAIN *K_GAIN * SDADC_RESOL));
-      VrefMv = (((InjectedConvDataCh8 + 32768) * AVG_VDD_ref) / (SDADC_GAIN *K_GAIN * SDADC_RESOL));
+      step_mv_new = External_Vref /(InjectedConvDataCh7+32768);
+      step_mv = step_mv + (step_mv_new - step_mv)/100;
+      VsensorMv = (InjectedConvDataCh4 + 32768) * step_mv;
+      VrefMv =    (InjectedConvDataCh8 + 32768) * step_mv;
+//      VrefMv =    (InjectedConvDataCh8 + 32768) * (AVG_VDD_ref / (SDADC_GAIN *K_GAIN * SDADC_RESOL));
       
 /* vidurkinimas Vsensor*/
        if (kaupimo_index1<10){     //kaupiame 10 reiksmiu bufferi
@@ -237,11 +243,11 @@ int main(void)
 	decimalPart = ((int)(AVG_VsensorMv*N_DECIMAL_POINTS_PRECISION)%N_DECIMAL_POINTS_PRECISION);
 	Post_office( integerPart,decimalPart,DUTY); //Paketas 3
             
-            integerPart = (int)AVG_VDD_ref;
-	decimalPart = ((int)(AVG_VDD_ref*N_DECIMAL_POINTS_PRECISION)%N_DECIMAL_POINTS_PRECISION);           
+            integerPart = (int)(step_mv*1000);
+	decimalPart = ((int)((step_mv*1000)*N_DECIMAL_POINTS_PRECISION)%N_DECIMAL_POINTS_PRECISION);           
             Post_office( integerPart,decimalPart,(External_Vref-2000)*100); //paketas 4
-            
-            Post_office( InjectedConvDataCh4,InjectedConvDataCh7,InjectedConvDataCh8); //paketas 5
+                        
+            Post_office( InjectedConvDataCh4+32768,InjectedConvDataCh7+32768,InjectedConvDataCh8+32768); //paketas 5
 
             
             flag_send=0;
@@ -282,9 +288,7 @@ float V_target_computation(float vref, float Vdd3V3) //_______________________ci
   float r0=240;
   float r1=1200;
   float r2=2400;
-  float t1=0;
-  float t2=0;
-  float t3=0;
+
 
   //Apskaiciuoju minusine VDD
   Vddminus=(Vdd3V3*-2.3944+4628.7)/1000;
@@ -596,7 +600,8 @@ void ADC_init(  )
 
 float termocompensation(float ADC_temperature){ //is ADC_temp gauna internal Vref itampa mV
     float result;
-    result= -0.00007*ADC_temperature*ADC_temperature + 0.1935*ADC_temperature + 1103.9;
+    //result= -0.00007*ADC_temperature*ADC_temperature + 0.1935*ADC_temperature + 1103.9;
+    result= -0.008*ADC_temperature +1243;
     //ADC_Vref_komp=(float)Vref + (-0.0245)*(float)Vtemp + (0.000014 * (float)(Vtemp*Vtemp)); 
   return result;
 }
@@ -605,13 +610,15 @@ float temperature(float ADC_vdd, float ADC_temperature){ //_____________________
     float tempe_degree;
     float tempe_mV;
     tempe_mV=(ADC_vdd/4095)*ADC_temperature; 
-    tempe_degree=-0.0008*tempe_mV*tempe_mV + 1.7501*tempe_mV - 872.8 ; 
+    tempe_degree=- 0.24*tempe_mV +360 ; 
+    //tempe_degree=-0.0008*tempe_mV*tempe_mV + 1.7501*tempe_mV - 872.8 ; 
   return tempe_degree;
 }
 
 float thermo_Vref(float temperatura_degree){ //______________________Pataisyti
     float result;
-    result = temperatura_degree*0.0668+2484.9;
+    result = temperatura_degree *0.065+2484.4;
+//    result = temperatura_degree*0.07+2577.5;
   return result;
 }
 
