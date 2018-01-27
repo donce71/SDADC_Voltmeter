@@ -155,7 +155,8 @@ int main(void)
   vref_internal_calibrated = *((uint16_t *)(VREF_INTERNAL_BASE_ADDRESS)); //ADC reiksme kai Vdd=3.3V
   Vref_internal_itampa= (vref_internal_calibrated)*3300/ 4095; //Vidinio Vref itampa
   Vref_internal_itampa= 1229;                // Kalibruojant su PICOLOG
-  targetVref_mazas=132.8;          
+  targetVref_mazas=154;          
+//  targetVoltage=targetVref_mazas*16;
   targetVoltage=targetVref_mazas*11.7;
   //targetVoltage=620;
   //DUTY =41820;  // su situ duty Vref yra 1091mV
