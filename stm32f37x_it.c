@@ -46,6 +46,7 @@
 extern int16_t InjectedConvDataCh4;
 extern int16_t InjectedConvDataCh8;
 extern int16_t InjectedConvDataCh7;
+extern int16_t InjectedConvData3Ch7;
 extern int16_t ping_pong = 0;
 
 
@@ -189,6 +190,21 @@ void SDADC1_IRQHandler(void)
   } 
 }
 
+/**
+  * @brief  This function handles SDADC3 interrupt request.
+  * @param  None
+  * @retval : None
+  */
+void SDADC3_IRQHandler(void)
+{
+  uint32_t ChannelIndex;
+  
+  if(SDADC_GetFlagStatus(SDADC3, SDADC_FLAG_JEOC) != RESET)
+  {
+    /* Get the converted value */
+    InjectedConvData3Ch7 = SDADC_GetInjectedConversionValue(SDADC3, &ChannelIndex);  
+  } 
+}
 /**
   * @brief  This function handles PPP interrupt request.
   * @param  None

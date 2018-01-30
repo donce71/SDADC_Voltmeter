@@ -2,8 +2,8 @@
   ******************************************************************************
   * @file    SDADC/SDADC_Voltmeter/main.c 
   * @author  Donatas
-  * @version V1.11.2
-  * @date    25-January-2018
+  * @version V1.12
+  * @date    30-January-2018
   * @brief   Main program body
   * Rx - PA2  TX - PA3, UART2 
   * SDADC PB2 
@@ -21,6 +21,9 @@
   * 2018-01-16 Thermokompensations
   * 2018-01-23 Third SDADC for reference 
   * 2018-01-25 Modified SDADC
+  * 2018-01-29 4th SDADC and PWM and 5V control
+  * 2018-01-30 Histereze control
+  * 2018-01-30 SAR ADC 5V control
   ******************************************************************************
   */
 
@@ -50,17 +53,20 @@ DMA_InitTypeDef     DMA_InitStructure;
 int16_t InjectedConvDataCh4 = 0;
 int16_t InjectedConvDataCh8 = 0;
 int16_t InjectedConvDataCh7 = 0;
+int16_t InjectedConvData3Ch7 = 0;
 
 __IO uint32_t TimingDelay = 0;
 uint32_t PWM_PERIOD=50000;
-__IO uint16_t RegularConvData_Tab[2];
+uint32_t PWM_PERIOD_5V=50000;
+uint16_t DUTY=9424;
+uint16_t DUTY_5V=20000;
+__IO uint16_t RegularConvData_Tab[3];
 
 /* ADC variables */
 float VrefMv = 0;
 float AVG_VrefMv=0;
 float VsensorMv = 0;
 float AVG_VsensorMv=0;
-__IO uint16_t  ADC1ConvertedValue[2] = {0,0};
 uint16_t vref_internal_calibrated = 0;
 
 float Vref_internal_itampa=0;
@@ -76,7 +82,10 @@ float new_temp=0;
 float External_Vref=0;
 float step_mv_new=0;
 float step_mv=0;
-
+float Vdd5V= 5000;
+float Vdd5V_AVG= 5000;
+float V_3v3_calculated=0;
+float AVG_V_3v3_calculated=3300;
 
 
 /* Vidurkinimo variables */
@@ -89,26 +98,29 @@ float sumatorius2 = 0;
 
 int integerPart;
 int decimalPart;
-uint16_t DUTY=9424;
+
 /* PI controller variables */
-float Kp=0.6;
-float Ki=0.1;
 float integral=0;
+float integral2=0;
 float targetVoltage=0;
 float targetVref_mazas=0;
 float AVG_error=0;
 int8_t flag_send=0;
+float Vdd5V_target=5000;
 
 /* Pagalbiniai variables */
 uint32_t kintamasis=0;
+float P_tunning=0;
+float I_tunning=0;
 
 
 /* Private function prototypes -----------------------------------------------*/
 static uint32_t SDADC1_Config(void);
+static uint32_t SDADC3_Config(void);
 void USART2_Configuration(void);
 void RS485(uint8_t direction);
 void GPIO_init(void);
-void InitializeTimer(uint32_t PWM_PERIOD);
+void InitializeTimer(uint32_t PWM_PERIOD, uint32_t PWM_PERIOD_5V);
 void InitializePWMChannel(void);
 void ADC_init( void );
 void ADC_measure (void);
@@ -119,8 +131,11 @@ float thermo_Vref(float temperatura_degree);
 
 void Post_office( uint16_t v1, uint16_t v2, uint16_t v3);
 void ChangePWM_duty( uint16_t PULSE );
-float PI_controller(void);
+void ChangePWM_5V_duty( uint16_t PULSE );
+float PI_controller( float Kp, float Ki);
 float V_target_computation(float vref, float Vdd3V3);
+float PI_con_5V(float value, float target, float Kp, float Ki);
+uint16_t histereze_5V(float value, uint16_t current_PWM);
 
 
 /* Private functions ---------------------------------------------------------*/
@@ -146,7 +161,7 @@ int main(void)
   
   GPIO_init();
   USART2_Configuration();
-  InitializeTimer(PWM_PERIOD);
+  InitializeTimer(PWM_PERIOD, PWM_PERIOD_5V);
   InitializePWMChannel();
   ADC_init();
   RS485(TRANSMIT);
@@ -155,7 +170,7 @@ int main(void)
   vref_internal_calibrated = *((uint16_t *)(VREF_INTERNAL_BASE_ADDRESS)); //ADC reiksme kai Vdd=3.3V
   Vref_internal_itampa= (vref_internal_calibrated)*3300/ 4095; //Vidinio Vref itampa
   Vref_internal_itampa= 1229;                // Kalibruojant su PICOLOG
-  targetVref_mazas=154;          
+  targetVref_mazas=130;          
 //  targetVoltage=targetVref_mazas*16;
   targetVoltage=targetVref_mazas*11.7;
   //targetVoltage=620;
@@ -173,6 +188,10 @@ int main(void)
   if(SDADC1_Config() != 0)
   {    while(1);     /* Forever loop */
   }
+  /* SDADC3 */
+  else if(SDADC3_Config() != 0)
+  {    while(1);     /* Forever loop */
+  }
   else
   {    
    while (1)
@@ -187,11 +206,20 @@ int main(void)
        temp=temp+(new_temp-temp)/100;
        External_Vref = thermo_Vref(temp);
        
+//       Vdd5V=((VDD_ref/4095)*RegularConvData_Tab[2])/0.633;
+//       Vdd5V_AVG = Vdd5V_AVG + (Vdd5V - Vdd5V_AVG)/1000;
 /* Compute the input voltage */   
       step_mv_new = External_Vref /(InjectedConvDataCh7+32768);
       step_mv = step_mv + (step_mv_new - step_mv)/100;
       VsensorMv = (InjectedConvDataCh4 + 32768) * step_mv;
       VrefMv =    (InjectedConvDataCh8 + 32768) * step_mv;
+      //5 Vdd matavimas
+      V_3v3_calculated=(step_mv*65535)*1.037;
+      AVG_V_3v3_calculated = V_3v3_calculated + (V_3v3_calculated - AVG_V_3v3_calculated)/1000;
+//      Vdd5V=((AVG_V_3v3_calculated/4095)*RegularConvData_Tab[2])/0.632;
+//      Vdd5V_AVG = Vdd5V_AVG + (Vdd5V - Vdd5V_AVG)/2000;
+      Vdd5V =    ((InjectedConvData3Ch7 + 32768) * step_mv)/0.6152;
+      Vdd5V_AVG = Vdd5V_AVG + (Vdd5V - Vdd5V_AVG)/100;
 //      VrefMv =    (InjectedConvDataCh8 + 32768) * (AVG_VDD_ref / (SDADC_GAIN *K_GAIN * SDADC_RESOL));
       
 /* vidurkinimas Vsensor*/
@@ -227,14 +255,17 @@ int main(void)
               sumavimo_index2=0;
 	  flag_send=1;
 /* Feedback: DUTY keiciu tik kas 100 matavimu, nes naudoju Vref AVG reiksme, kuri kinta tik cia if*/
-              DUTY=PI_controller();
+              DUTY=PI_controller(0.6,0.1);
               ChangePWM_duty( PWM_PERIOD - DUTY );
+//              DUTY_5V = PI_con_5V(Vdd5V_AVG, Vdd5V_target, 10,3);
+              DUTY_5V = histereze_5V(Vdd5V_AVG, DUTY_5V);
+              ChangePWM_5V_duty(DUTY_5V);
              }
         }
        
 /* Transmit */
       if (flag_send==1){
-        	Post_office( ADC_Vref,ADC_Vtemp,(VDD_ref-3000)*100); //paketas 1
+        	/*Post_office( ADC_Vref,ADC_Vtemp,(VDD_ref-3000)*100); //paketas 1
 
 	integerPart = (int)AVG_VrefMv;
 	decimalPart = ((int)(AVG_VrefMv*N_DECIMAL_POINTS_PRECISION)%N_DECIMAL_POINTS_PRECISION);
@@ -247,9 +278,13 @@ int main(void)
             integerPart = (int)(step_mv*1000);
 	decimalPart = ((int)((step_mv*1000)*N_DECIMAL_POINTS_PRECISION)%N_DECIMAL_POINTS_PRECISION);           
             Post_office( integerPart,decimalPart,(External_Vref-2000)*100); //paketas 4
-                        
-            Post_office( InjectedConvDataCh4+32768,InjectedConvDataCh7+32768,InjectedConvDataCh8+32768); //paketas 5
-
+            */            
+            Post_office( InjectedConvDataCh4+32768,InjectedConvDataCh8+32768,InjectedConvDataCh7+32768); //paketas 5
+          
+            /*integerPart = (int)Vdd5V_AVG;
+	decimalPart = ((int)(Vdd5V_AVG*N_DECIMAL_POINTS_PRECISION)%N_DECIMAL_POINTS_PRECISION);
+	Post_office( integerPart,decimalPart,DUTY_5V); //Paketas 6
+        */
             
             flag_send=0;
       }
@@ -258,15 +293,16 @@ int main(void)
   }
 }
 
-float PI_controller()
+float PI_controller( float Kp, float Ki)
 { 
   float output=0;
   float error=0;
   float skirtumas=0;
 
   error=targetVoltage-AVG_VrefMv;
-  AVG_error=AVG_error+(AVG_error-error)/10;
-  integral = integral + (error* 4); //reikia padauginti is iteration period______DEMESIO!!!!!!!!!!!!!!!!
+  //AVG_error=AVG_error+(AVG_error-error)/10;
+  if ( ((DUTY>=PWM_PERIOD) || (DUTY<=0))!=1 ){
+    integral = integral + (error* 4);}       //reikia padauginti is iteration period______DEMESIO!!!!!!!!!!!!!!!!
   output= (Kp*error+Ki*integral);
   
   if( output > PWM_PERIOD )
@@ -279,6 +315,49 @@ float PI_controller()
     output=DUTY;
   }*/
 
+  return output; 
+}
+
+float PI_con_5V(float value, float target, float Kp, float Ki)
+{ 
+  float output=0;
+  float error=0;
+  float skirtumas=0;
+
+  error=target-value;
+  if ( ((DUTY_5V>=PWM_PERIOD_5V) || (DUTY_5V<=0))!=1 ){
+    integral2 = integral2 + (error* 4);} //reikia padauginti is iteration period______DEMESIO!!!!!!!!!!!!!!!!
+  skirtumas=Ki*integral2;
+  output= (Kp*error+Ki*integral2);
+  
+  if( output > PWM_PERIOD_5V )
+      output = PWM_PERIOD_5V;
+  if( output < 0 )
+       output = 0;
+  
+  return output; 
+}
+
+uint16_t histereze_5V(float value, uint16_t current_PWM)
+{ 
+  uint16_t output=0;
+  float error=0;
+  float skirtumas=0;
+
+  if (value> 5000.05){
+    output=current_PWM-8;
+  }
+  else if (value< 4999.95){
+    output=current_PWM+8;
+  }
+  else
+    output=DUTY_5V;
+  
+  if( output > PWM_PERIOD_5V )
+      output = PWM_PERIOD_5V;
+  if( output < 0 )
+       output = 0;
+  
   return output; 
 }
 
@@ -492,6 +571,106 @@ static uint32_t SDADC1_Config(void)
   return 0;
 }
 
+static uint32_t SDADC3_Config(void)
+{
+  SDADC_AINStructTypeDef SDADC_AINStructure;
+  GPIO_InitTypeDef GPIO_InitStructure;
+  NVIC_InitTypeDef NVIC_InitStructure;
+  uint32_t SDADCTimeout = 0;
+
+  /* SDADC1 APB2 interface clock enable */
+  RCC_APB2PeriphClockCmd(RCC_APB2Periph_SDADC3, ENABLE);
+  
+  /* PWR APB1 interface clock enable */
+  RCC_APB1PeriphClockCmd(RCC_APB1Periph_PWR, ENABLE);
+  /* Enable SDADC1 analog interface */
+  PWR_SDADCAnalogCmd(PWR_SDADCAnalog_3, ENABLE);
+
+  /* Set the SDADC divider: The SDADC should run @6MHz */
+  /* If Sysclk is 72MHz, SDADC divider should be 12 */
+  RCC_SDADCCLKConfig(RCC_SDADCCLK_SYSCLK_Div48);
+
+  /* RCC_AHBPeriph_GPIOB Peripheral clock enable */
+  RCC_AHBPeriphClockCmd(RCC_AHBPeriph_GPIOB, ENABLE);
+
+  /* SDADC1 channel 7P (PB15) */
+  GPIO_InitStructure.GPIO_Mode  = GPIO_Mode_AN;
+  GPIO_InitStructure.GPIO_PuPd = GPIO_PuPd_NOPULL;
+  GPIO_InitStructure.GPIO_Pin = GPIO_Pin_15;
+  GPIO_Init(GPIOB, &GPIO_InitStructure);
+    
+
+  /* Select External reference: The reference voltage selection is available
+     only in SDADC1 and therefore to select the VREF for SDADC2/SDADC3, SDADC1
+     clock must be already enabled */
+  SDADC_VREFSelect(SDADC_VREF_Ext);
+
+  /* Insert delay equal to ~5 ms */
+  Delay(5);
+  
+  /* Enable SDADC1 */
+  SDADC_Cmd(SDADC3, ENABLE);
+  
+  /* Enter initialization mode */
+  SDADC_InitModeCmd(SDADC3, ENABLE);
+  SDADCTimeout = SDADC_INIT_TIMEOUT;
+  /* wait for INITRDY flag to be set */
+  while((SDADC_GetFlagStatus(SDADC3, SDADC_FLAG_INITRDY) == RESET) && (--SDADCTimeout != 0));
+
+  if(SDADCTimeout == 0)
+  {
+    /* INITRDY flag can not set */
+    return 1;
+  }
+
+  /* Analog Input configuration conf0: use single ended zero reference */
+  SDADC_AINStructure.SDADC_InputMode = SDADC_InputMode_SEZeroReference;
+  SDADC_AINStructure.SDADC_Gain = SDADC_Gain_1;
+  SDADC_AINStructure.SDADC_CommonMode = SDADC_CommonMode_VSSA;
+  SDADC_AINStructure.SDADC_Offset = 0;
+  SDADC_AINInit(SDADC3, SDADC_Conf_0, &SDADC_AINStructure);
+
+  /* select SDADC3 channel 7 to use conf0 */
+  SDADC_ChannelConfig(SDADC3, SDADC_Channel_7, SDADC_Conf_0);
+
+  /* select channel 7*/
+  SDADC_InjectedChannelSelect(SDADC3, SDADC_Channel_7 );
+  /* Enable continuous mode */
+  SDADC_InjectedContinuousModeCmd(SDADC3, ENABLE);
+
+  /* Exit initialization mode */
+  SDADC_InitModeCmd(SDADC3, DISABLE);
+
+  /* NVIC Configuration */
+  NVIC_InitStructure.NVIC_IRQChannel = SDADC3_IRQn;
+  NVIC_InitStructure.NVIC_IRQChannelPreemptionPriority = 1;
+  NVIC_InitStructure.NVIC_IRQChannelSubPriority = 0;
+  NVIC_InitStructure.NVIC_IRQChannelCmd = ENABLE;
+  NVIC_Init(&NVIC_InitStructure);
+
+  /* configure calibration to be performed on conf0 */
+  SDADC_CalibrationSequenceConfig(SDADC3, SDADC_CalibrationSequence_1);
+  /* start SDADC1 Calibration */
+  SDADC_StartCalibration(SDADC3);
+  /* Set calibration timeout: 5.12 ms at 6 MHz in a single calibration sequence */
+  SDADCTimeout = SDADC_CAL_TIMEOUT;
+  /* wait for SDADC1 Calibration process to end */
+  while((SDADC_GetFlagStatus(SDADC3, SDADC_FLAG_EOCAL) == RESET) && (--SDADCTimeout != 0));
+  
+  if(SDADCTimeout == 0)
+  {
+    /* EOCAL flag can not set */
+    return 2;
+  }
+
+  /* Enable end of injected conversion interrupt */
+  SDADC_ITConfig(SDADC3, SDADC_IT_JEOC, ENABLE);
+  /* Start a software start conversion */
+  SDADC_SoftwareStartInjectedConv(SDADC3);
+    
+  return 0;
+}
+
 void USART2_Configuration(void)
 {
     RCC_APB1PeriphClockCmd(RCC_APB1Periph_USART2, ENABLE);
@@ -543,7 +722,7 @@ void ADC_init(  )
   DMA_InitStructure.DMA_PeripheralBaseAddr = (uint32_t)ADC1_DR_Address;
   DMA_InitStructure.DMA_MemoryBaseAddr = (uint32_t)RegularConvData_Tab;
   DMA_InitStructure.DMA_DIR = DMA_DIR_PeripheralSRC;
-  DMA_InitStructure.DMA_BufferSize = 2;
+  DMA_InitStructure.DMA_BufferSize = 3;
   DMA_InitStructure.DMA_PeripheralInc = DMA_PeripheralInc_Disable;
   DMA_InitStructure.DMA_MemoryInc = DMA_MemoryInc_Enable;
   DMA_InitStructure.DMA_PeripheralDataSize = DMA_PeripheralDataSize_HalfWord;
@@ -572,13 +751,15 @@ void ADC_init(  )
   ADC_InitStructure.ADC_ContinuousConvMode = ENABLE;
   ADC_InitStructure.ADC_ExternalTrigConv = ADC_ExternalTrigConv_None;
   ADC_InitStructure.ADC_DataAlign = ADC_DataAlign_Right;
-  ADC_InitStructure.ADC_NbrOfChannel = 2;
+  ADC_InitStructure.ADC_NbrOfChannel = 3;
   ADC_Init(ADC1, &ADC_InitStructure);
   
   /* Convert the ADC1 Channel 9 with 55.5 Cycles as sampling time */ 
   ADC_RegularChannelConfig(ADC1, ADC_Channel_Vrefint, 1, ADC_SampleTime_239Cycles5);
   /* Vtemperature */ 
   ADC_RegularChannelConfig(ADC1, ADC_Channel_TempSensor, 2, ADC_SampleTime_239Cycles5);
+    /* 5V Vdd*/ 
+  ADC_RegularChannelConfig(ADC1, ADC_Channel_0, 3, ADC_SampleTime_239Cycles5);
   
   ADC_TempSensorVrefintCmd(ENABLE);
     
@@ -618,7 +799,8 @@ float temperature(float ADC_vdd, float ADC_temperature){ //_____________________
 
 float thermo_Vref(float temperatura_degree){ //______________________Pataisyti
     float result;
-    result = temperatura_degree *0.065+2484.4;
+    result = temperatura_degree *0.067+2484.4;   
+//    result = temperatura_degree *0.065+2484.4;
 //    result = temperatura_degree*0.07+2577.5;
   return result;
 }
@@ -676,6 +858,13 @@ void GPIO_init(){
    GPIO_InitStructure.GPIO_Mode = GPIO_Mode_AF;
    GPIO_InitStructure.GPIO_Speed = GPIO_Speed_50MHz;
    GPIO_Init(GPIOF, &GPIO_InitStructure);
+  //PWM pin 5V
+   RCC_AHBPeriphClockCmd(RCC_AHBPeriph_GPIOA, ENABLE);
+ 
+   GPIO_InitStructure.GPIO_Pin = GPIO_Pin_15;
+   GPIO_InitStructure.GPIO_Mode = GPIO_Mode_AF;
+   GPIO_InitStructure.GPIO_Speed = GPIO_Speed_50MHz;
+   GPIO_Init(GPIOA, &GPIO_InitStructure);   
    
   //Multiplexer pin
    RCC_AHBPeriphClockCmd(RCC_AHBPeriph_GPIOB, ENABLE);
@@ -686,10 +875,12 @@ void GPIO_init(){
   GPIO_InitStructure.GPIO_OType = GPIO_OType_PP;
   GPIO_InitStructure.GPIO_PuPd = GPIO_PuPd_NOPULL;
   GPIO_Init(GPIOB, &GPIO_InitStructure);
+  
+  
    
 }
 
-void InitializeTimer(uint32_t PWM_PERIOD)
+void InitializeTimer(uint32_t PWM_PERIOD, uint32_t PWM_PERIOD_5V)
 {
     RCC_APB1PeriphClockCmd(RCC_APB1Periph_TIM4, ENABLE);
 
@@ -701,6 +892,18 @@ void InitializeTimer(uint32_t PWM_PERIOD)
     timerInitStructure.TIM_RepetitionCounter = 0;
     TIM_TimeBaseInit(TIM4, &timerInitStructure);
     TIM_Cmd(TIM4, ENABLE);
+    
+    //Timer for 5V
+    RCC_APB1PeriphClockCmd(RCC_APB1Periph_TIM2, ENABLE);
+
+    timerInitStructure.TIM_Prescaler = 0;
+    timerInitStructure.TIM_CounterMode = TIM_CounterMode_Up;
+    timerInitStructure.TIM_Period = PWM_PERIOD_5V;
+    timerInitStructure.TIM_ClockDivision = TIM_CKD_DIV1;
+    timerInitStructure.TIM_RepetitionCounter = 0;
+    TIM_TimeBaseInit(TIM2, &timerInitStructure);
+    TIM_Cmd(TIM2, ENABLE);
+    
 }
 
 void InitializePWMChannel()
@@ -715,11 +918,29 @@ void InitializePWMChannel()
     TIM_OC4PreloadConfig(TIM4, TIM_OCPreload_Enable);
  
     GPIO_PinAFConfig(GPIOF, GPIO_PinSource6, GPIO_AF_2);
+
+    //PWM for 5V
+    TIM_OCInitTypeDef outputChannelInit2 = {1,};
+    outputChannelInit2.TIM_OCMode = TIM_OCMode_PWM1;
+    outputChannelInit2.TIM_Pulse = 0;
+    outputChannelInit2.TIM_OutputState = TIM_OutputState_Enable;
+    outputChannelInit2.TIM_OCPolarity = TIM_OCPolarity_High;
+ 
+    TIM_OC1Init(TIM2, &outputChannelInit2);
+    TIM_OC1PreloadConfig(TIM2, TIM_OCPreload_Enable);
+ 
+    GPIO_PinAFConfig(GPIOA, GPIO_PinSource15, GPIO_AF_1);    
+    
 }
 
 void ChangePWM_duty( uint16_t PULSE )
 {
 TIM4->CCR4=PULSE;
+}
+
+void ChangePWM_5V_duty( uint16_t PULSE )
+{
+TIM2->CCR1=PULSE;
 }
 
 void RS485(uint8_t direction){
