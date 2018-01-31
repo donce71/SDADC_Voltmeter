@@ -2,7 +2,7 @@
   ******************************************************************************
   * @file    SDADC/SDADC_Voltmeter/main.c 
   * @author  Donatas
-  * @version V1.12
+  * @version V1.12.2
   * @date    30-January-2018
   * @brief   Main program body
   * Rx - PA2  TX - PA3, UART2 
@@ -24,6 +24,7 @@
   * 2018-01-29 4th SDADC and PWM and 5V control
   * 2018-01-30 Histereze control
   * 2018-01-30 SAR ADC 5V control
+  * 2018-01-31 External vref 3V, naujas perskaiciavimas
   ******************************************************************************
   */
 
@@ -211,6 +212,7 @@ int main(void)
 /* Compute the input voltage */   
       step_mv_new = External_Vref /(InjectedConvDataCh7+32768);
       step_mv = step_mv + (step_mv_new - step_mv)/100;
+      
       VsensorMv = (InjectedConvDataCh4 + 32768) * step_mv;
       VrefMv =    (InjectedConvDataCh8 + 32768) * step_mv;
       //5 Vdd matavimas
@@ -267,10 +269,10 @@ int main(void)
       if (flag_send==1){
         	/*Post_office( ADC_Vref,ADC_Vtemp,(VDD_ref-3000)*100); //paketas 1
 
-	integerPart = (int)AVG_VrefMv;
+	*/integerPart = (int)AVG_VrefMv;
 	decimalPart = ((int)(AVG_VrefMv*N_DECIMAL_POINTS_PRECISION)%N_DECIMAL_POINTS_PRECISION);
 	Post_office( integerPart,decimalPart,temp*100); //Paketas 2
-            
+        /*    
             integerPart = (int)AVG_VsensorMv;
 	decimalPart = ((int)(AVG_VsensorMv*N_DECIMAL_POINTS_PRECISION)%N_DECIMAL_POINTS_PRECISION);
 	Post_office( integerPart,decimalPart,DUTY); //Paketas 3
@@ -799,7 +801,8 @@ float temperature(float ADC_vdd, float ADC_temperature){ //_____________________
 
 float thermo_Vref(float temperatura_degree){ //______________________Pataisyti
     float result;
-    result = temperatura_degree *0.067+2484.4;   
+    result = -0.0054*temperatura_degree+3000.45;   
+//    result = temperatura_degree *0.067+2484.4;   
 //    result = temperatura_degree *0.065+2484.4;
 //    result = temperatura_degree*0.07+2577.5;
   return result;
