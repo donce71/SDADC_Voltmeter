@@ -2,7 +2,7 @@
   ******************************************************************************
   * @file    SDADC/SDADC_Voltmeter/main.c 
   * @author  Donatas
-  * @version V1.12.3
+  * @version V1.12.4
   * @date    01-February-2018
   * @brief   Main program body
   * Rx - PA2  TX - PA3, UART2 
@@ -25,7 +25,8 @@
   * 2018-01-30 Histereze control
   * 2018-01-30 SAR ADC 5V control
   * 2018-01-31 External vref 3V, naujas perskaiciavimas
-  ******************************************************************************
+  * 2018-02-01 Tinkamas dreifas, Vsensor:~30mV, Vrefpwm: 0.2mV
+ ******************************************************************************
   */
 
 
@@ -166,19 +167,16 @@ int main(void)
   InitializePWMChannel();
   ADC_init();
   RS485(TRANSMIT);
-  GPIO_SetBits(GPIOB, GPIO_Pin_4); // Multiplexer for negative offset
-    
+  
+  GPIO_SetBits(GPIOB, GPIO_Pin_4);      // spaudziant mazeja itampa: Multiplexer 
+  //  GPIO_ResetBits(GPIOB, GPIO_Pin_4); // spaudziant dideja itampa: Multiplexer
+  
   vref_internal_calibrated = *((uint16_t *)(VREF_INTERNAL_BASE_ADDRESS)); //ADC reiksme kai Vdd=3.3V
   Vref_internal_itampa= (vref_internal_calibrated)*3300/ 4095; //Vidinio Vref itampa
   Vref_internal_itampa= 1229;                // Kalibruojant su PICOLOG
-  targetVref_mazas=154;          
-//  targetVoltage=targetVref_mazas*16;
+  targetVref_mazas=10;          
   targetVoltage=targetVref_mazas*11.7;
-  //targetVoltage=620;
-  //DUTY =41820;  // su situ duty Vref yra 1091mV
-  
-  ChangePWM_duty( PWM_PERIOD/2 );
-    
+      
   /* Test DMA1 TC flag */
   while((DMA_GetFlagStatus(DMA1_FLAG_TC1)) == RESET ); 
     
