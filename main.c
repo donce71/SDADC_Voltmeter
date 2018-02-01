@@ -2,8 +2,8 @@
   ******************************************************************************
   * @file    SDADC/SDADC_Voltmeter/main.c 
   * @author  Donatas
-  * @version V1.12.2
-  * @date    30-January-2018
+  * @version V1.12.3
+  * @date    01-February-2018
   * @brief   Main program body
   * Rx - PA2  TX - PA3, UART2 
   * SDADC PB2 
@@ -799,7 +799,8 @@ float temperature(float ADC_vdd, float ADC_temperature){ //_____________________
 
 float thermo_Vref(float temperatura_degree){ //______________________Pataisyti
     float result;
-      result = -0.012*temperatura_degree+3000.45; 
+      result = -0.0025*temperatura_degree+3000.45;
+//    result = -0.012*temperatura_degree+3000.45; 
 //    result = -0.0054*temperatura_degree+3000.45;   
 //    result = temperatura_degree *0.067+2484.4;   
 //    result = temperatura_degree *0.065+2484.4;
