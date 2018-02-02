@@ -2,8 +2,8 @@
   ******************************************************************************
   * @file    SDADC/SDADC_Voltmeter/main.c 
   * @author  Donatas
-  * @version V1.12.4
-  * @date    01-February-2018
+  * @version V1.12.6
+  * @date    02-February-2018
   * @brief   Main program body
   * Rx - PA2  TX - PA3, UART2 
   * SDADC PB2 
@@ -26,6 +26,7 @@
   * 2018-01-30 SAR ADC 5V control
   * 2018-01-31 External vref 3V, naujas perskaiciavimas
   * 2018-02-01 Tinkamas dreifas, Vsensor:~30mV, Vrefpwm: 0.2mV
+  * 2018-02-02 SDADC skaitomas su DMA
  ******************************************************************************
   */
 
@@ -63,6 +64,7 @@ uint32_t PWM_PERIOD_5V=50000;
 uint16_t DUTY=9424;
 uint16_t DUTY_5V=16000;
 __IO uint16_t RegularConvData_Tab[3];
+__IO int16_t SDADCData_Tab[3];
 
 /* ADC variables */
 float VrefMv = 0;
@@ -70,7 +72,7 @@ float AVG_VrefMv=0;
 float VsensorMv = 0;
 float AVG_VsensorMv=0;
 uint16_t vref_internal_calibrated = 0;
-
+float Tempe=0;
 float Vref_internal_itampa=0;
 float VDD_ref=0;
 float AVG_VDD_ref=3300;
@@ -79,7 +81,6 @@ float Voltage_buffer[10] = {0};
 float Voltage_buffer2[10] = {0};
 float Voltage_of_10=0;
 float ADC_Vtemp=0; float ADC_Vref=0;
-float temp=0;
 float new_temp=0;
 float External_Vref=0;
 float step_mv_new=0;
@@ -88,6 +89,7 @@ float Vdd5V= 5000;
 float Vdd5V_AVG= 5000;
 float V_3v3_calculated=0;
 float AVG_V_3v3_calculated=3300;
+/* Flash write/read variables */
 
 
 /* Vidurkinimo variables */
@@ -104,6 +106,8 @@ int decimalPart;
 /* PI controller variables */
 float integral=0;
 float integral2=0;
+float integral3=0;
+
 float targetVoltage=0;
 float targetVref_mazas=0;
 float AVG_error=0;
@@ -112,8 +116,10 @@ float Vdd5V_target=5000;
 
 /* Pagalbiniai variables */
 uint32_t kintamasis=0;
-float P_tunning=0;
-float I_tunning=0;
+float P_tu=2;
+float I_tu=0;
+uint8_t flag_calibruoti=0;
+/*
 
 
 /* Private function prototypes -----------------------------------------------*/
@@ -125,6 +131,7 @@ void GPIO_init(void);
 void InitializeTimer(uint32_t PWM_PERIOD, uint32_t PWM_PERIOD_5V);
 void InitializePWMChannel(void);
 void ADC_init( void );
+void DMA_initSDADC(void);
 void ADC_measure (void);
 float Get_8of10AVG(float buffer[]);
 float termocompensation(float Vtemp);
@@ -135,13 +142,17 @@ void Post_office( uint16_t v1, uint16_t v2, uint16_t v3);
 void ChangePWM_duty( uint16_t PULSE );
 void ChangePWM_5V_duty( uint16_t PULSE );
 float PI_controller( float Kp, float Ki);
-float V_target_computation(float vref, float Vdd3V3);
 float PI_con_5V(float value, float target, float Kp, float Ki);
 uint16_t histereze_5V(float value, uint16_t current_PWM);
+uint8_t offset_calib( void );
+float PI_con_Vsensor(float value, float target, float Kp, float Ki);
+void measureALL(void);
+float sensor_init(void);
+
 
 
 /* Private functions ---------------------------------------------------------*/
-
+uint32_t sadr;
 /**
   * @brief  Main program.
   * @param  None
@@ -161,25 +172,28 @@ int main(void)
   RCC_GetClocksFreq(&RCC_Clocks);
   SysTick_Config(RCC_Clocks.HCLK_Frequency / 1000);
   
+//  sadr = (uint32_t)&SDADC1->JDATAR;
+  
   GPIO_init();
   USART2_Configuration();
   InitializeTimer(PWM_PERIOD, PWM_PERIOD_5V);
   InitializePWMChannel();
   ADC_init();
   RS485(TRANSMIT);
-  
-  GPIO_SetBits(GPIOB, GPIO_Pin_4);      // spaudziant mazeja itampa: Multiplexer 
-  //  GPIO_ResetBits(GPIOB, GPIO_Pin_4); // spaudziant dideja itampa: Multiplexer
-  
+  DMA_initSDADC();
+
+ 
   vref_internal_calibrated = *((uint16_t *)(VREF_INTERNAL_BASE_ADDRESS)); //ADC reiksme kai Vdd=3.3V
   Vref_internal_itampa= (vref_internal_calibrated)*3300/ 4095; //Vidinio Vref itampa
   Vref_internal_itampa= 1229;                // Kalibruojant su PICOLOG
-  targetVref_mazas=10;          
-  targetVoltage=targetVref_mazas*11.7;
-      
+  //targetVref_mazas=10;          
+  //targetVoltage=targetVref_mazas*11.7;
+  //targetVoltage=1800;
+   targetVoltage = sensor_init();
+
+ 
   /* Test DMA1 TC flag */
   while((DMA_GetFlagStatus(DMA1_FLAG_TC1)) == RESET ); 
-    
   /* Clear DMA TC flag */
   DMA_ClearFlag(DMA1_FLAG_TC1);
 
@@ -195,95 +209,34 @@ int main(void)
   {    
    while (1)
     {
-/* SAR ADC */
-       ADC_Vref=RegularConvData_Tab[0]; 
-       ADC_Vtemp=RegularConvData_Tab[1];
-/* Thermocompensations */  
-       
-/*     ateiciai, maitinimo itampai tiksliai suzinoti ir nereikes tada vidinio ref naudoti  
-      V_3v3_calculated=(step_mv*65535)*1.037;
-      AVG_V_3v3_calculated = V_3v3_calculated + (V_3v3_calculated - AVG_V_3v3_calculated)/1000;
-*/       
-       Vref_internal_itampa=termocompensation(ADC_Vtemp); 
-       VDD_ref=4095.0*(Vref_internal_itampa/ADC_Vref);
-       new_temp=temperature(VDD_ref,ADC_Vtemp);                 // atiduoda laipsnius
-       temp=temp+(new_temp-temp)/100;
-       External_Vref = thermo_Vref(temp);
+      if (flag_calibruoti==1){
+        if (offset_calib()>50){  //visi output daugiau nei 50 yra klaidos
+          while(1);         } //Nepavyko sukalibtuoti
+        flag_calibruoti=0;
+      }
 
-/* Compute the input voltage */   
-      step_mv_new = External_Vref /(InjectedConvDataCh7+32768);
-      step_mv = step_mv + (step_mv_new - step_mv)/100;
-      
-      VsensorMv = (InjectedConvDataCh4 + 32768) * step_mv;
-      VrefMv =    (InjectedConvDataCh8 + 32768) * step_mv;
-      //5 Vdd matavimas
-      Vdd5V =    ((InjectedConvData3Ch7 + 32768) * step_mv)/0.6175; //su Gwinstek matuojant 0.6175 atitnka 5V, kai varzos 2.4K ir 3.9K
-      Vdd5V_AVG = Vdd5V_AVG + (Vdd5V - Vdd5V_AVG)/200;
-      
-/* vidurkinimas Vsensor*/
-       if (kaupimo_index1<10){     //kaupiame 10 reiksmiu bufferi
-          Voltage_buffer[kaupimo_index1]=VsensorMv;
-          kaupimo_index1++;
-          }
-       else{                     // apskaiciuoja buferio vidurki is 8 reiksmiu (be min ir max)
-            Voltage_of_10=Get_8of10AVG(Voltage_buffer);
-            kaupimo_index1=0;  
-            sumatorius1+=Voltage_of_10;
-            sumavimo_index1++;
-            if ( sumavimo_index1>9){
-              AVG_VsensorMv= sumatorius1/10;  
-              sumatorius1=0;
-              sumavimo_index1=0; 
-            }
-        }
-       
-/* vidurkinimas Vref*/
-       if (kaupimo_index2<10){     //kaupiame 10 reiksmiu bufferi
-          Voltage_buffer2[kaupimo_index2]=VrefMv;
-          kaupimo_index2++;
-          }
-       else{                     // apskaiciuoja buferio vidurki is 8 reiksmiu (be min ir max)
-            Voltage_of_10=Get_8of10AVG(Voltage_buffer2);
-            kaupimo_index2=0;  
-            sumatorius2+=Voltage_of_10;
-            sumavimo_index2++;
-            if ( sumavimo_index2>9){
-              AVG_VrefMv= sumatorius2/10;  
-              sumatorius2=0;
-              sumavimo_index2=0;
-	  flag_send=1;
+/* ALL ADC AND SDADC MEASUREMENTS */
+        measureALL();
+            
 /* Feedback: DUTY keiciu tik kas 100 matavimu, nes naudoju Vref AVG reiksme, kuri kinta tik cia if*/
-              DUTY=PI_controller(0.6,0.1);
-              ChangePWM_duty( PWM_PERIOD - DUTY );
-//              DUTY_5V = PI_con_5V(Vdd5V_AVG, Vdd5V_target, 10,3);
-              DUTY_5V = histereze_5V(Vdd5V_AVG, DUTY_5V);
-              ChangePWM_5V_duty(DUTY_5V);
-             }
-        }
+//    DUTY_5V = PI_con_5V(Vdd5V_AVG, Vdd5V_target, 10,3);
+      DUTY_5V = histereze_5V(Vdd5V_AVG, DUTY_5V);
+      ChangePWM_5V_duty(DUTY_5V);
+      DUTY=PI_controller(30,0.2);   //0.6,0.1
+      ChangePWM_duty( PWM_PERIOD - DUTY );
        
 /* Transmit */
       if (flag_send==1){
         	/*Post_office( ADC_Vref,ADC_Vtemp,(VDD_ref-3000)*100); //paketas 1
-*/
+
 	integerPart = (int)AVG_VrefMv;
 	decimalPart = ((int)(AVG_VrefMv*N_DECIMAL_POINTS_PRECISION)%N_DECIMAL_POINTS_PRECISION);
-	Post_office( integerPart,decimalPart,temp*100); //Paketas 2
-            
+	Post_office( integerPart,decimalPart,DUTY); //Paketas 2
+ */           
             integerPart = (int)AVG_VsensorMv;
 	decimalPart = ((int)(AVG_VsensorMv*N_DECIMAL_POINTS_PRECISION)%N_DECIMAL_POINTS_PRECISION);
 	Post_office( integerPart,decimalPart,DUTY); //Paketas 3
- /*           
-            integerPart = (int)(step_mv*1000);
-	decimalPart = ((int)((step_mv*1000)*N_DECIMAL_POINTS_PRECISION)%N_DECIMAL_POINTS_PRECISION);           
-            Post_office( integerPart,decimalPart,(External_Vref-2000)*100); //paketas 4
-                        
-            Post_office( InjectedConvDataCh4+32768,InjectedConvDataCh8+32768,InjectedConvDataCh7+32768); //paketas 5
-          
-            integerPart = (int)Vdd5V_AVG;
-	decimalPart = ((int)(Vdd5V_AVG*N_DECIMAL_POINTS_PRECISION)%N_DECIMAL_POINTS_PRECISION);
-	Post_office( integerPart,decimalPart,DUTY_5V); //Paketas 6
-        */
-            
+      
             flag_send=0;
       }
       Delay(2); //_____________________________________DEMESIO
@@ -297,11 +250,11 @@ float PI_controller( float Kp, float Ki)
   float error=0;
   float skirtumas=0;
 
-  error=targetVoltage-AVG_VrefMv;
+  error=targetVoltage-VrefMv;
   //AVG_error=AVG_error+(AVG_error-error)/10;
   if ( ((DUTY>=PWM_PERIOD) || (DUTY<=0))!=1 ){
-    integral = integral + (error* 4);}       //reikia padauginti is iteration period______DEMESIO!!!!!!!!!!!!!!!!
-  output= (Kp*error+Ki*integral);
+    integral = integral + (error);}       //reikia padauginti is iteration period______DEMESIO!!!!!!!!!!!!!!!!
+  output= (Kp*error+Ki*integral)+25000;
   
   if( output > PWM_PERIOD )
       output = PWM_PERIOD;
@@ -313,6 +266,26 @@ float PI_controller( float Kp, float Ki)
     output=DUTY;
   }*/
 
+  return output; 
+}
+
+float PI_con_Vsensor(float value, float target, float Kp, float Ki)
+{ 
+  float output=0;
+  float error=0;
+  float skirtumas=0;
+
+  error=target-value;
+  if ( ((DUTY>=PWM_PERIOD) || (DUTY<=0))!=1 ){
+    integral3 = integral3 + (error);} 
+  
+  output= (Kp*error+Ki*integral3)+25000;
+  
+  if( output > PWM_PERIOD )
+      output = PWM_PERIOD;
+  if( output < 0 )
+       output = 0;
+  
   return output; 
 }
 
@@ -359,26 +332,169 @@ uint16_t histereze_5V(float value, uint16_t current_PWM)
   return output; 
 }
 
-float V_target_computation(float vref, float Vdd3V3) //_______________________cia minusiniam Vref (nereikalingas dar)
-{ 
-  float Vddminus=0;
-  float Vpwm=0;
-  float r0=240;
-  float r1=1200;
-  float r2=2400;
-
-
-  //Apskaiciuoju minusine VDD
-  Vddminus=(Vdd3V3*-2.3944+4628.7)/1000;
+uint8_t offset_calib (void){
   
-  //Apskaicuoju Vref didiji target
-  /*t1= ( vref*r0-Vddminus*r0  ) * ( (r1*r2/r0) +r1+r2 )  ;
-  t2=(r0*r2)  - (  r1*(Vddminus)/r0  ) + Vddminus;
-  t3=  ( vref*r0-Vddminus*r0  ) * ( (r1*r2/r0) +r1+r2 )    /  (r0*r2)  ;
-  */
-  Vpwm= (  ( ( vref*r0-Vddminus*r0  ) * ( (r1*r2/r0) +r1+r2 )  )  /  (r0*r2)  ) - (  r1*(-Vddminus)/r0  ) + Vddminus;
+  uint8_t output=0;
+  uint32_t i=0;
+  uint32_t j=0;
+  uint8_t flag_baigta=0;
+  int8_t offset_poliarumas=0;
+  float refPWM_target;
+  
+     /* local variable definition */
+  uint8_t state = 1;
 
-  return (Vpwm*1000); 
+   while (flag_baigta==0){
+     
+   switch(state) {
+      case 1 :
+         GPIO_ResetBits(GPIOB, GPIO_Pin_4); // spaudziant dideja itampa: Multiplexer
+         ChangePWM_duty( PWM_PERIOD - 0 );  //Vref = 2mV
+         Delay(100); //ms
+         measureALL();
+         if (VsensorMv<=100)
+           state=2;  // offset neigiamas
+         else 
+           state=3; //offset teigiamas
+         break;
+         
+      case 2 : //algoritmas kai offset neigiamas
+         // valdiklis su target 100mV, o matuojama itampa yra AVG_Vsensor
+        for( i=1;i<15000;i++){
+         measureALL();
+         DUTY=PI_con_Vsensor(AVG_VsensorMv, 100, 0.003, 0.003);
+         ChangePWM_duty( PWM_PERIOD - DUTY ); 
+         
+         integerPart = (int)AVG_VsensorMv;
+         decimalPart = ((int)(AVG_VsensorMv*N_DECIMAL_POINTS_PRECISION)%N_DECIMAL_POINTS_PRECISION);
+         Post_office( integerPart,decimalPart,DUTY); //Paketas 2
+         
+         Delay(2);
+        }
+        if (AVG_VsensorMv>98 && AVG_VsensorMv<102){
+          output=1; // gerai sukalibruota neigiamas offset
+          refPWM_target= AVG_VrefMv;
+          offset_poliarumas=1;
+          state=5; }
+        else{
+          output=98; // nepavyko sukalibruoti neigiamo offset
+          state=3;}  //tegul bando su teigiamu
+         break;
+         
+      case 3 : //algoritmas kai offset teigiamas, patikrinimas ar tikrai neigiamas
+         GPIO_SetBits(GPIOB, GPIO_Pin_4); // spaudziant mazeja itampa: Multiplexer
+         ChangePWM_duty( PWM_PERIOD - 50000 );  //Vref = 3300mV
+         Delay(100); //ms
+         measureALL();
+         if (VsensorMv>3180)
+           state=4;  // offset tikrai  teigiamas
+         else {
+           output=97; //klaida, ofset neveikia kaip teigiamas
+           flag_baigta=1;}
+         break;
+         
+      case 4 ://algoritmas kai offset teigiamas
+         for( i=1;i<15000;i++){
+          measureALL();
+          DUTY=PI_con_Vsensor(AVG_VsensorMv, 3180, 0.01, 0.003); // target 3.18V
+          ChangePWM_duty( PWM_PERIOD - DUTY ); 
+         
+         integerPart = (int)AVG_VsensorMv;
+         decimalPart = ((int)(AVG_VsensorMv*N_DECIMAL_POINTS_PRECISION)%N_DECIMAL_POINTS_PRECISION);
+         Post_office( integerPart,decimalPart,DUTY); //Paketas 2
+         
+          Delay(2);
+          }
+         if (AVG_VsensorMv>3178 && AVG_VsensorMv<3182){
+          output=4; // gerai sukalibruotas teigiamas offset
+          refPWM_target= AVG_VrefMv;
+          offset_poliarumas=2;
+          state=5;}
+         else {
+          output=95; // nepavyko sukalibruoti teigiamo offset  
+          flag_baigta=1;}
+         break;
+         
+       case 5 ://irasome i atminti
+           FLASH_Unlock();
+            FLASH_ErasePage(variable_ADRESS);
+            FLASH_ProgramWord(variable_ADRESS, *(uint32_t *)&refPWM_target);
+            FLASH_ProgramWord(variable_ADRESS+4, *(int8_t *)&offset_poliarumas);
+            FLASH_Lock();
+            flag_baigta=1;
+         break;
+
+      default :
+         output=99; //error
+   }
+   }
+  
+  return output; 
+}
+
+void measureALL(void)
+{
+/* SAR ADC */
+       ADC_Vref=RegularConvData_Tab[0]; 
+       ADC_Vtemp=RegularConvData_Tab[1];
+/* Thermocompensations */  
+       
+/*     ateiciai, maitinimo itampai tiksliai suzinoti ir nereikes tada vidinio ref naudoti  
+      V_3v3_calculated=(step_mv*65535)*1.037;
+      AVG_V_3v3_calculated = V_3v3_calculated + (V_3v3_calculated - AVG_V_3v3_calculated)/1000;
+*/       
+       Vref_internal_itampa=termocompensation(ADC_Vtemp); 
+       VDD_ref=4095.0*(Vref_internal_itampa/ADC_Vref);
+       new_temp=temperature(VDD_ref,ADC_Vtemp);                 // atiduoda laipsnius
+       Tempe=Tempe+(new_temp-Tempe)/100;
+       External_Vref = thermo_Vref(Tempe);
+       //External_Vref=3000;
+/* Compute the input voltage */   
+      step_mv_new = External_Vref /(SDADCData_Tab[1]+32768);
+      step_mv = step_mv + (step_mv_new - step_mv)/100;
+      step_mv=step_mv_new;
+      
+      VsensorMv = (SDADCData_Tab[0] + 32768) * step_mv;
+      VrefMv =    (SDADCData_Tab[2] + 32768) * step_mv;
+      
+      //5 Vdd matavimas
+      Vdd5V =    ((InjectedConvData3Ch7 + 32768) * step_mv)/0.6175; //su Gwinstek matuojant 0.6175 atitnka 5V, kai varzos 2.4K ir 3.9K
+      Vdd5V_AVG = Vdd5V_AVG + (Vdd5V - Vdd5V_AVG)/200;
+      
+/* vidurkinimas Vsensor*/
+       if (kaupimo_index1<10){     //kaupiame 10 reiksmiu bufferi
+          Voltage_buffer[kaupimo_index1]=VsensorMv;
+          kaupimo_index1++;
+          }
+       else{                     // apskaiciuoja buferio vidurki is 8 reiksmiu (be min ir max)
+            Voltage_of_10=Get_8of10AVG(Voltage_buffer);
+            kaupimo_index1=0;  
+            sumatorius1+=Voltage_of_10;
+            sumavimo_index1++;
+            if ( sumavimo_index1>9){
+              AVG_VsensorMv= sumatorius1/10;  
+              sumatorius1=0;
+              sumavimo_index1=0; 
+            }
+        }
+       
+/* vidurkinimas Vref*/
+       if (kaupimo_index2<10){     //kaupiame 10 reiksmiu bufferi
+          Voltage_buffer2[kaupimo_index2]=VrefMv;
+          kaupimo_index2++;
+          }
+       else{                     // apskaiciuoja buferio vidurki is 8 reiksmiu (be min ir max)
+            Voltage_of_10=Get_8of10AVG(Voltage_buffer2);
+            kaupimo_index2=0;  
+            sumatorius2+=Voltage_of_10;
+            sumavimo_index2++;
+            if ( sumavimo_index2>9){
+              AVG_VrefMv= sumatorius2/10;  
+              sumatorius2=0;
+              sumavimo_index2=0;
+	  flag_send=1;
+             }
+        } 
 }
 
 void Post_office( uint16_t v1, uint16_t v2, uint16_t v3){
@@ -517,6 +633,9 @@ static uint32_t SDADC1_Config(void)
     return 1;
   }
 
+    SDADC1->CR1 |= 1 << 16; // DMA channel enabled to read data from injected channel group
+
+  
   /* Analog Input configuration conf0: use single ended zero reference */
   SDADC_AINStructure.SDADC_InputMode = SDADC_InputMode_SEZeroReference;
   SDADC_AINStructure.SDADC_Gain = SDADC_Gain_1;
@@ -540,11 +659,11 @@ static uint32_t SDADC1_Config(void)
   SDADC_InitModeCmd(SDADC1, DISABLE);
 
   /* NVIC Configuration */
-  NVIC_InitStructure.NVIC_IRQChannel = SDADC1_IRQn;
+ /* NVIC_InitStructure.NVIC_IRQChannel = SDADC1_IRQn;
   NVIC_InitStructure.NVIC_IRQChannelPreemptionPriority = 0;
   NVIC_InitStructure.NVIC_IRQChannelSubPriority = 0;
   NVIC_InitStructure.NVIC_IRQChannelCmd = ENABLE;
-  NVIC_Init(&NVIC_InitStructure);
+  NVIC_Init(&NVIC_InitStructure);*/
 
   /* configure calibration to be performed on conf0 */
   SDADC_CalibrationSequenceConfig(SDADC1, SDADC_CalibrationSequence_1);
@@ -562,11 +681,49 @@ static uint32_t SDADC1_Config(void)
   }
 
   /* Enable end of injected conversion interrupt */
-  SDADC_ITConfig(SDADC1, SDADC_IT_JEOC, ENABLE);
+  SDADC_ITConfig(SDADC1, SDADC_IT_JEOC, DISABLE);
+  Delay(500);
   /* Start a software start conversion */
   SDADC_SoftwareStartInjectedConv(SDADC1);
     
   return 0;
+}
+
+void DMA_initSDADC(void){
+  
+    /* DMA2 clock enable */
+  RCC_AHBPeriphClockCmd(RCC_AHBPeriph_DMA2 , ENABLE);
+  
+  /* DMA2 Channel1 Config */
+  DMA_DeInit(DMA2_Channel3);
+  DMA_InitStructure.DMA_PeripheralBaseAddr = (uint32_t)SDADC1_DR_Address;
+  DMA_InitStructure.DMA_MemoryBaseAddr = (uint32_t)SDADCData_Tab;
+  DMA_InitStructure.DMA_DIR = DMA_DIR_PeripheralSRC;
+  DMA_InitStructure.DMA_BufferSize = 3;
+  DMA_InitStructure.DMA_PeripheralInc = DMA_PeripheralInc_Disable;
+  DMA_InitStructure.DMA_MemoryInc = DMA_MemoryInc_Enable;
+  DMA_InitStructure.DMA_PeripheralDataSize = DMA_PeripheralDataSize_HalfWord;
+  DMA_InitStructure.DMA_MemoryDataSize = DMA_MemoryDataSize_HalfWord;
+  DMA_InitStructure.DMA_Mode = DMA_Mode_Circular;
+  DMA_InitStructure.DMA_Priority = DMA_Priority_High;
+  DMA_InitStructure.DMA_M2M = DMA_M2M_Disable;
+  DMA_Init(DMA2_Channel3, &DMA_InitStructure);
+  /* DMA2 Channel1 enable */
+  DMA_Cmd(DMA2_Channel3, ENABLE);
+  
+  DMA_ITConfig(DMA2_Channel3, DMA_IT_TC, ENABLE);
+  
+  NVIC_InitStructure.NVIC_IRQChannel = DMA2_Channel3_IRQn;
+  NVIC_InitStructure.NVIC_IRQChannelPreemptionPriority = 0;
+  NVIC_InitStructure.NVIC_IRQChannelSubPriority = 0;
+  NVIC_InitStructure.NVIC_IRQChannelCmd = ENABLE;
+  NVIC_Init(&NVIC_InitStructure);
+  
+
+   
+    /* Enable DMA */
+  SDADC_DMAConfig(SDADC1, SDADC_DMATransfer_Regular, ENABLE);
+  
 }
 
 static uint32_t SDADC3_Config(void)
@@ -606,7 +763,7 @@ static uint32_t SDADC3_Config(void)
   /* Insert delay equal to ~5 ms */
   Delay(5);
   
-  /* Enable SDADC1 */
+  /* Enable SDADC3 */
   SDADC_Cmd(SDADC3, ENABLE);
   
   /* Enter initialization mode */
@@ -620,6 +777,7 @@ static uint32_t SDADC3_Config(void)
     /* INITRDY flag can not set */
     return 1;
   }
+  
 
   /* Analog Input configuration conf0: use single ended zero reference */
   SDADC_AINStructure.SDADC_InputMode = SDADC_InputMode_SEZeroReference;
@@ -931,7 +1089,27 @@ void InitializePWMChannel()
     TIM_OC1PreloadConfig(TIM2, TIM_OCPreload_Enable);
  
     GPIO_PinAFConfig(GPIOA, GPIO_PinSource15, GPIO_AF_1);    
-    
+}
+
+float sensor_init(void)
+{
+uint32_t *temp;
+int8_t offset_pol;
+float output;
+
+     //nuskaitymas is flash 
+  temp = (uint32_t*)variable_ADRESS;
+  output = *(float *)temp;
+  temp = (uint32_t*)(variable_ADRESS+4);
+  offset_pol = *(int8_t *)temp; // 1 - neigiamas offset, 2 - teigiamas offset
+
+  if (offset_pol==1){
+    GPIO_ResetBits(GPIOB, GPIO_Pin_4); // spaudziant dideja itampa: Multiplexer
+  }
+  else {
+    GPIO_SetBits(GPIOB, GPIO_Pin_4);   // spaudziant mazeja itampa: Multiplexer 
+  }
+   return output;
 }
 
 void ChangePWM_duty( uint16_t PULSE )

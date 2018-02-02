@@ -175,7 +175,7 @@ void SDADC1_IRQHandler(void)
   if(SDADC_GetFlagStatus(SDADC1, SDADC_FLAG_JEOC) != RESET)
   {
     if (ping_pong==0){
-    /* Get the converted value */
+    //Get the converted value
     InjectedConvDataCh4 = SDADC_GetInjectedConversionValue(SDADC1, &ChannelIndex);
     ping_pong+=1;
    }
@@ -204,6 +204,15 @@ void SDADC3_IRQHandler(void)
     /* Get the converted value */
     InjectedConvData3Ch7 = SDADC_GetInjectedConversionValue(SDADC3, &ChannelIndex);  
   } 
+}
+uint32_t cnt = 0;
+void DMA2_Channel3_IRQHandler(void)
+{
+  if(DMA_GetITStatus(DMA2_IT_TC3) != RESET)
+  {
+    DMA_ClearITPendingBit(DMA2_IT_TC3);
+    cnt++;
+  }
 }
 /**
   * @brief  This function handles PPP interrupt request.

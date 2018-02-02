@@ -65,6 +65,8 @@
 
 #define VREF_INTERNAL_BASE_ADDRESS 0x1FFFF7BA
 #define ADC1_DR_Address             0x4001244C
+#define SDADC1_DR_Address           0x40016060
+#define variable_ADRESS             0x08004000
 
 
 
