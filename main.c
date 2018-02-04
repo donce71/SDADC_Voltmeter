@@ -2,8 +2,8 @@
   ******************************************************************************
   * @file    SDADC/SDADC_Voltmeter/main.c 
   * @author  Donatas
-  * @version V1.12.6
-  * @date    02-February-2018
+  * @version V1.13
+  * @date    04-February-2018
   * @brief   Main program body
   * Rx - PA2  TX - PA3, UART2 
   * SDADC PB2 
@@ -26,7 +26,9 @@
   * 2018-01-30 SAR ADC 5V control
   * 2018-01-31 External vref 3V, naujas perskaiciavimas
   * 2018-02-01 Tinkamas dreifas, Vsensor:~30mV, Vrefpwm: 0.2mV
-  * 2018-02-02 SDADC skaitomas su DMA ir kalibravimo mechanizmas
+  * 2018-02-02 SDADC skaitomas su DMA ir kalibravimo mechanizmas  
+  * 2018-02-04 Pradedu rasyti koda plokstei su INA188 stiprintuvais
+
  ******************************************************************************
   */
 

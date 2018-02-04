@@ -1003,7 +1003,7 @@
                     <item>B.floatCoeff</item>
                     <item>A.floatCoeff</item>
                     <item>flag_calibruoti</item>
-                    <item></item>
+                    <item />
                 </expressions>
                 <col-names>
                     <item>Expression</item>
@@ -1133,7 +1133,7 @@
                     <item>RCC_Clocks</item>
                     <item>sadr</item>
                     <item>offset_pol</item>
-                    <item></item>
+                    <item />
                 </expressions>
                 <col-names>
                     <item>Expression</item>
