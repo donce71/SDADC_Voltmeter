@@ -2,7 +2,7 @@
   ******************************************************************************
   * @file    SDADC/SDADC_Voltmeter/main.c 
   * @author  Donatas
-  * @version V1.13
+  * @version V1.13.2
   * @date    04-February-2018
   * @brief   Main program body
   * Rx - PA2  TX - PA3, UART2 
@@ -28,7 +28,7 @@
   * 2018-02-01 Tinkamas dreifas, Vsensor:~30mV, Vrefpwm: 0.2mV
   * 2018-02-02 SDADC skaitomas su DMA ir kalibravimo mechanizmas  
   * 2018-02-04 Pradedu rasyti koda plokstei su INA188 stiprintuvais
-
+  * 2018-02-04 Naujas Post Office
  ******************************************************************************
   */
 
@@ -42,9 +42,6 @@
   * @{
   */
 
-/* Private typedef -----------------------------------------------------------*/
-/* Private define ------------------------------------------------------------*/
-
 /* Private macro -------------------------------------------------------------*/
 GPIO_InitTypeDef    GPIO_InitStructure;
 USART_InitTypeDef USART_InitStructure;
@@ -52,7 +49,6 @@ NVIC_InitTypeDef NVIC_InitStructure;
 ADC_InitTypeDef     ADC_InitStructure;
 GPIO_InitTypeDef    GPIO_InitStructure;
 DMA_InitTypeDef     DMA_InitStructure;
-
 
 /* Private variables ---------------------------------------------------------*/
 int16_t InjectedConvDataCh4 = 0;
@@ -91,7 +87,6 @@ float Vdd5V= 5000;
 float Vdd5V_AVG= 5000;
 float V_3v3_calculated=0;
 float AVG_V_3v3_calculated=3300;
-/* Flash write/read variables */
 
 /* Vidurkinimo variables */
 uint16_t sumavimo_index1=0; 
@@ -100,8 +95,6 @@ float sumatorius1 = 0;
 uint16_t sumavimo_index2=0; 
 uint16_t kaupimo_index2=0; 
 float sumatorius2 = 0;
-
-
 
 /* PI controller variables */
 float integral=0;
@@ -121,7 +114,6 @@ float I_tu=0;
 uint8_t flag_calibruoti=0;
 float RxBuffer[11]={0xFFF,0xFFF,0xFFF,0xFFF,0xFFF,0xFFF,0xFFF,0xFFF,0xFFF,0xFFF,0xFFF};
 /*
-
 
 /* Private function prototypes -----------------------------------------------*/
 static uint32_t SDADC1_Config(void);
@@ -151,14 +143,6 @@ void measureALL(void);
 float sensor_init(void);
 
 
-
-/* Private functions ---------------------------------------------------------*/
-uint32_t sadr;
-/**
-  * @brief  Main program.
-  * @param  None
-  * @retval None
-  */
 int main(void)
 {
   RCC_ClocksTypeDef RCC_Clocks;
@@ -251,6 +235,10 @@ float PI_controller(float value, float target, float Kp, float Ki)
     integral = integral + (error)/10;}       //reikia padauginti is iteration period______DEMESIO!!!!!!!!!!!!!!!!
   output= (Kp*error+Ki*integral);
   
+      //apsauga nuo integral suoliu, RIBAS reikia parinkti pagal matavimo diapazona
+  if ((DUTY==0 || DUTY==PWM_PERIOD) && (error>1500 || error<-1500)  )
+      integral=0;
+  
   if( output > PWM_PERIOD )
       output = PWM_PERIOD;
   if( output < 0 )
@@ -284,11 +272,15 @@ float PI_con_5V(float value, float target, float Kp, float Ki)
   float output=0;
   float error=0;
   float skirtumas=0;
-
+  
   error=target-value;
   if ( ((DUTY_5V<PWM_PERIOD_5V) && (DUTY_5V>0)) && (Ki!=0) ){
     integral2 = integral2 + (error);} //reikia padauginti is iteration period______DEMESIO!!!!!!!!!!!!!!!!
   output= (Kp*error+Ki*integral2);
+  
+    //apsauga nuo integral suoliu, RIBAS reikia parinkti pagal matavimo diapazona
+  if ((DUTY_5V==0 || DUTY_5V==PWM_PERIOD_5V) && (error>50 || error<-50)  )
+      integral2=0;
   
   if( output > PWM_PERIOD_5V )
       output = PWM_PERIOD_5V;
@@ -541,7 +533,6 @@ void Post_office( float *buffer_float){
   while(USART_GetFlagStatus(USART2, USART_FLAG_TXE) == RESET);
     USART_SendData(USART2, 0xC1);
 }
-
 
 
 float termocompensation(float ADC_temperature){ //is ADC_temp gauna internal Vref itampa mV
@@ -906,7 +897,7 @@ void USART2_Configuration(void)
   NVIC_Init(&NVIC_InitStructure);*/
 }
 
-void ADC_init(  )
+void ADC_init( )
 { 
  
   /* ADCCLK = PCLK2/4 */

@@ -172,6 +172,7 @@
             <file>$PROJ_DIR$\STM32373C-EVAL\Obj\stm32f37x_wwdg.pbi</file>
             <file>$PROJ_DIR$\..\..\..\..\Libraries\STM32F37x_StdPeriph_Driver\inc\stm32f37x_can.h</file>
             <file>$PROJ_DIR$\STM32373C-EVAL\Obj\stm32f37x_dac.o</file>
+            <file>$PROJ_DIR$\..\..\..\..\..\arm\8.10.1\ST\STM32F3xx\STM32F37x_DSP_StdPeriph_Lib\Libraries\CMSIS\Device\ST\STM32F37x\Source\Templates\iar\startup_stm32f37x.s</file>
         </outputs>
         <file>
             <name>[ROOT_NODE]</name>
@@ -940,10 +941,6 @@
                 <tool>
                     <name>ICCARM</name>
                     <file> 128 76 87 70 94 38 52 47 131 159 110 151 69 37 81 165 136 144 90 74 137 49 120 124 66 45 92 126 133 31 162 163 101 53 116 40 125 153 58 115 152</file>
-                </tool>
-                <tool>
-                    <name>BICOMP</name>
-                    <file> 120 76 70 81 162 38 153 87 90 92 116 115 69 110 136 137 66 133 101 125 58 128 37 159 94 52 131 151 165 144 74 49 124 45 126 31 163 53 40 152</file>
                 </tool>
             </inputs>
         </file>
