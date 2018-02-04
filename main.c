@@ -26,7 +26,7 @@
   * 2018-01-30 SAR ADC 5V control
   * 2018-01-31 External vref 3V, naujas perskaiciavimas
   * 2018-02-01 Tinkamas dreifas, Vsensor:~30mV, Vrefpwm: 0.2mV
-  * 2018-02-02 SDADC skaitomas su DMA
+  * 2018-02-02 SDADC skaitomas su DMA ir kalibravimo mechanizmas
  ******************************************************************************
   */
 
