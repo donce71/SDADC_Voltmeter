@@ -2,8 +2,8 @@
   ******************************************************************************
   * @file    SDADC/SDADC_Voltmeter/main.c 
   * @author  Donatas
-  * @version V1.12.6
-  * @date    02-February-2018
+  * @version V1.23.2
+  * @date    04-February-2018
   * @brief   Main program body
   * Rx - PA2  TX - PA3, UART2 
   * SDADC PB2 
@@ -26,7 +26,9 @@
   * 2018-01-30 SAR ADC 5V control
   * 2018-01-31 External vref 3V, naujas perskaiciavimas
   * 2018-02-01 Tinkamas dreifas, Vsensor:~30mV, Vrefpwm: 0.2mV
-  * 2018-02-02 SDADC skaitomas su DMA
+  * 2018-02-02 SDADC skaitomas su DMA ir kalibravimo mechanizmas  
+  * 2018-02-04 Pradedu rasyti koda plokstei su INA188 stiprintuvais
+  * 2018-02-04 Naujas Post Office
  ******************************************************************************
   */
 
@@ -40,9 +42,6 @@
   * @{
   */
 
-/* Private typedef -----------------------------------------------------------*/
-/* Private define ------------------------------------------------------------*/
-
 /* Private macro -------------------------------------------------------------*/
 GPIO_InitTypeDef    GPIO_InitStructure;
 USART_InitTypeDef USART_InitStructure;
@@ -50,7 +49,6 @@ NVIC_InitTypeDef NVIC_InitStructure;
 ADC_InitTypeDef     ADC_InitStructure;
 GPIO_InitTypeDef    GPIO_InitStructure;
 DMA_InitTypeDef     DMA_InitStructure;
-
 
 /* Private variables ---------------------------------------------------------*/
 int16_t InjectedConvDataCh4 = 0;
@@ -89,8 +87,6 @@ float Vdd5V= 5000;
 float Vdd5V_AVG= 5000;
 float V_3v3_calculated=0;
 float AVG_V_3v3_calculated=3300;
-/* Flash write/read variables */
-
 
 /* Vidurkinimo variables */
 uint16_t sumavimo_index1=0; 
@@ -99,9 +95,6 @@ float sumatorius1 = 0;
 uint16_t sumavimo_index2=0; 
 uint16_t kaupimo_index2=0; 
 float sumatorius2 = 0;
-
-int integerPart;
-int decimalPart;
 
 /* PI controller variables */
 float integral=0;
@@ -119,8 +112,9 @@ uint32_t kintamasis=0;
 float P_tu=2;
 float I_tu=0;
 uint8_t flag_calibruoti=0;
+float RxBuffer[11]={0xFFF,0xFFF,0xFFF,0xFFF,0xFFF,0xFFF,0xFFF,0xFFF,0xFFF,0xFFF,0xFFF};
+uint8_t calibravimo_rezult=0;
 /*
-
 
 /* Private function prototypes -----------------------------------------------*/
 static uint32_t SDADC1_Config(void);
@@ -138,10 +132,10 @@ float termocompensation(float Vtemp);
 float temperature(float ADC_vdd, float ADC_temperature);
 float thermo_Vref(float temperatura_degree);
 
-void Post_office( uint16_t v1, uint16_t v2, uint16_t v3);
+void Post_office( float *buffer_float);
 void ChangePWM_duty( uint16_t PULSE );
 void ChangePWM_5V_duty( uint16_t PULSE );
-float PI_controller( float Kp, float Ki);
+float PI_controller(float value, float target, float Kp, float Ki);
 float PI_con_5V(float value, float target, float Kp, float Ki);
 uint16_t histereze_5V(float value, uint16_t current_PWM);
 uint8_t offset_calib( void );
@@ -150,14 +144,6 @@ void measureALL(void);
 float sensor_init(void);
 
 
-
-/* Private functions ---------------------------------------------------------*/
-uint32_t sadr;
-/**
-  * @brief  Main program.
-  * @param  None
-  * @retval None
-  */
 int main(void)
 {
   RCC_ClocksTypeDef RCC_Clocks;
@@ -171,9 +157,7 @@ int main(void)
   /* SysTick end of count event each 1ms */
   RCC_GetClocksFreq(&RCC_Clocks);
   SysTick_Config(RCC_Clocks.HCLK_Frequency / 1000);
-  
-//  sadr = (uint32_t)&SDADC1->JDATAR;
-  
+    
   GPIO_init();
   USART2_Configuration();
   InitializeTimer(PWM_PERIOD, PWM_PERIOD_5V);
@@ -188,8 +172,7 @@ int main(void)
   Vref_internal_itampa= 1229;                // Kalibruojant su PICOLOG
   //targetVref_mazas=10;          
   //targetVoltage=targetVref_mazas*11.7;
-  //targetVoltage=1800;
-   targetVoltage = sensor_init();
+  targetVoltage = sensor_init();
 
  
   /* Test DMA1 TC flag */
@@ -209,9 +192,9 @@ int main(void)
   {    
    while (1)
     {
+/*  KALIBRAVIMAS */      
       if (flag_calibruoti==1){
-        if (offset_calib()>50){  //visi output daugiau nei 50 yra klaidos
-          while(1);         } //Nepavyko sukalibtuoti
+        calibravimo_rezult=offset_calib();//visi output daugiau nei 50decimal yra klaidos
         flag_calibruoti=0;
       }
 
@@ -219,72 +202,77 @@ int main(void)
         measureALL();
             
 /* Feedback: DUTY keiciu tik kas 100 matavimu, nes naudoju Vref AVG reiksme, kuri kinta tik cia if*/
-//    DUTY_5V = PI_con_5V(Vdd5V_AVG, Vdd5V_target, 10,3);
-      DUTY_5V = histereze_5V(Vdd5V_AVG, DUTY_5V);
+      DUTY_5V = PI_con_5V(Vdd5V, Vdd5V_target, 10,10);
       ChangePWM_5V_duty(DUTY_5V);
-      DUTY=PI_controller(30,0.2);   //0.6,0.1
+      DUTY=PI_controller(VrefMv,targetVoltage,10,20);   //30,0.2   0.6,0.1    10,20
       ChangePWM_duty( PWM_PERIOD - DUTY );
-       
+      
+      
 /* Transmit */
       if (flag_send==1){
-        	/*Post_office( ADC_Vref,ADC_Vtemp,(VDD_ref-3000)*100); //paketas 1
+        
+        RxBuffer[0]=AVG_VrefMv;
+        RxBuffer[1]=AVG_VsensorMv;
+        RxBuffer[2]=Vdd5V_AVG;
+//       RxBuffer[4]=ADC_Vtemp;
+        Post_office( RxBuffer);
 
-	integerPart = (int)AVG_VrefMv;
-	decimalPart = ((int)(AVG_VrefMv*N_DECIMAL_POINTS_PRECISION)%N_DECIMAL_POINTS_PRECISION);
-	Post_office( integerPart,decimalPart,DUTY); //Paketas 2
- */           
-            integerPart = (int)AVG_VsensorMv;
-	decimalPart = ((int)(AVG_VsensorMv*N_DECIMAL_POINTS_PRECISION)%N_DECIMAL_POINTS_PRECISION);
-	Post_office( integerPart,decimalPart,DUTY); //Paketas 3
-      
-            flag_send=0;
+        flag_send=0;
       }
       Delay(2); //_____________________________________DEMESIO
     }
   }
 }
 
-float PI_controller( float Kp, float Ki)
-{ 
-  float output=0;
-  float error=0;
-  float skirtumas=0;
-
-  error=targetVoltage-VrefMv;
-  //AVG_error=AVG_error+(AVG_error-error)/10;
-  if ( ((DUTY>=PWM_PERIOD) || (DUTY<=0))!=1 ){
-    integral = integral + (error);}       //reikia padauginti is iteration period______DEMESIO!!!!!!!!!!!!!!!!
-  output= (Kp*error+Ki*integral)+25000;
-  
-  if( output > PWM_PERIOD )
-      output = PWM_PERIOD;
-  if( output < 0 )
-       output = 0;
-  
-  /*skirtumas=output-(float)DUTY;
-  if ( (skirtumas<1) && (skirtumas>-1) ){
-    output=DUTY;
-  }*/
-
-  return output; 
-}
-
-float PI_con_Vsensor(float value, float target, float Kp, float Ki)
+float PI_controller(float value, float target, float Kp, float Ki)
 { 
   float output=0;
   float error=0;
   float skirtumas=0;
 
   error=target-value;
-  if ( ((DUTY>=PWM_PERIOD) || (DUTY<=0))!=1 ){
-    integral3 = integral3 + (error);} 
+  if ( ((DUTY<PWM_PERIOD) && (DUTY>0)) && (Ki!=0) ){
+    integral = integral + (error)/10;}       //reikia padauginti is iteration period______DEMESIO!!!!!!!!!!!!!!!!
+  output= (Kp*error+Ki*integral);
   
-  output= (Kp*error+Ki*integral3)+25000;
+      //apsauga nuo integral suoliu, RIBAS reikia parinkti pagal matavimo diapazona
+  if ((DUTY==0 || DUTY==PWM_PERIOD) && (error>1500 || error<-1500)  )
+      integral=0;
   
   if( output > PWM_PERIOD )
       output = PWM_PERIOD;
   if( output < 0 )
        output = 0;
+    
+  return output; 
+}
+
+float PI_con_Vsensor(float value, float target, float Kp, float Ki)
+{ 
+  
+  float output=0;
+  float error=0;
+  float skirtumas=0;
+
+  error=target-value;
+  if ( ((DUTY<PWM_PERIOD) && (DUTY>0)) && (Ki!=0) ){
+    integral3 = integral3 + (error)/10;}       //reikia padauginti is iteration period______DEMESIO!!!!!!!!!!!!!!!!
+  output= (Kp*error+Ki*integral3);
+  
+      //apsauga nuo integral suoliu, RIBAS reikia parinkti pagal matavimo diapazona
+  if ((DUTY==0 || DUTY==PWM_PERIOD) && (error>1500 || error<-1500)  )
+      integral=0;
+     
+  if( output > PWM_PERIOD )
+      output = PWM_PERIOD;
+  if( output < 0 )
+       output = 0;
+  
+        RxBuffer[0]=AVG_VrefMv;
+        RxBuffer[1]=AVG_VsensorMv;
+        RxBuffer[2]=DUTY;
+        RxBuffer[3]=integral3;
+        RxBuffer[4]=error;        
   
   return output; 
 }
@@ -294,18 +282,21 @@ float PI_con_5V(float value, float target, float Kp, float Ki)
   float output=0;
   float error=0;
   float skirtumas=0;
-
+  
   error=target-value;
-  if ( ((DUTY_5V>=PWM_PERIOD_5V) || (DUTY_5V<=0))!=1 ){
-    integral2 = integral2 + (error* 4);} //reikia padauginti is iteration period______DEMESIO!!!!!!!!!!!!!!!!
-  skirtumas=Ki*integral2;
+  if ( ((DUTY_5V<PWM_PERIOD_5V) && (DUTY_5V>0)) && (Ki!=0) ){
+    integral2 = integral2 + (error);} //reikia padauginti is iteration period______DEMESIO!!!!!!!!!!!!!!!!
   output= (Kp*error+Ki*integral2);
+  
+    //apsauga nuo integral suoliu, RIBAS reikia parinkti pagal matavimo diapazona
+  if ((DUTY_5V==0 || DUTY_5V==PWM_PERIOD_5V) && (error>50 || error<-50)  )
+      integral2=0;
   
   if( output > PWM_PERIOD_5V )
       output = PWM_PERIOD_5V;
   if( output < 0 )
        output = 0;
-  
+    
   return output; 
 }
 
@@ -336,13 +327,13 @@ uint8_t offset_calib (void){
   
   uint8_t output=0;
   uint32_t i=0;
-  uint32_t j=0;
   uint8_t flag_baigta=0;
   int8_t offset_poliarumas=0;
   float refPWM_target;
   
      /* local variable definition */
   uint8_t state = 1;
+  DUTY=0;
 
    while (flag_baigta==0){
      
@@ -360,16 +351,12 @@ uint8_t offset_calib (void){
          
       case 2 : //algoritmas kai offset neigiamas
          // valdiklis su target 100mV, o matuojama itampa yra AVG_Vsensor
-        for( i=1;i<15000;i++){
+        for( i=1;i<3000;i++){                           //___________________3000 apie 10sekundziu
          measureALL();
-         DUTY=PI_con_Vsensor(AVG_VsensorMv, 100, 0.003, 0.003);
-         ChangePWM_duty( PWM_PERIOD - DUTY ); 
-         
-         integerPart = (int)AVG_VsensorMv;
-         decimalPart = ((int)(AVG_VsensorMv*N_DECIMAL_POINTS_PRECISION)%N_DECIMAL_POINTS_PRECISION);
-         Post_office( integerPart,decimalPart,DUTY); //Paketas 2
-         
+         DUTY=PI_con_Vsensor(VsensorMv, 100, 0.5, 1.5); // target 50mV  0.2 1
+         ChangePWM_duty( PWM_PERIOD - DUTY );
          Delay(2);
+         Post_office( RxBuffer);
         }
         if (AVG_VsensorMv>98 && AVG_VsensorMv<102){
           output=1; // gerai sukalibruota neigiamas offset
@@ -394,16 +381,12 @@ uint8_t offset_calib (void){
          break;
          
       case 4 ://algoritmas kai offset teigiamas
-         for( i=1;i<15000;i++){
+         for( i=1;i<3000;i++){               //_________________________pamazinti laika
           measureALL();
-          DUTY=PI_con_Vsensor(AVG_VsensorMv, 3180, 0.01, 0.003); // target 3.18V
+          DUTY=PI_con_Vsensor(VsensorMv, 3180, 0.2, 1); // target 3.18V  0.2 1
           ChangePWM_duty( PWM_PERIOD - DUTY ); 
-         
-         integerPart = (int)AVG_VsensorMv;
-         decimalPart = ((int)(AVG_VsensorMv*N_DECIMAL_POINTS_PRECISION)%N_DECIMAL_POINTS_PRECISION);
-         Post_office( integerPart,decimalPart,DUTY); //Paketas 2
-         
           Delay(2);
+          Post_office( RxBuffer);
           }
          if (AVG_VsensorMv>3178 && AVG_VsensorMv<3182){
           output=4; // gerai sukalibruotas teigiamas offset
@@ -448,7 +431,7 @@ void measureALL(void)
        new_temp=temperature(VDD_ref,ADC_Vtemp);                 // atiduoda laipsnius
        Tempe=Tempe+(new_temp-Tempe)/100;
        External_Vref = thermo_Vref(Tempe);
-       //External_Vref=3000;
+       
 /* Compute the input voltage */   
       step_mv_new = External_Vref /(SDADCData_Tab[1]+32768);
       step_mv = step_mv + (step_mv_new - step_mv)/100;
@@ -497,56 +480,45 @@ void measureALL(void)
         } 
 }
 
-void Post_office( uint16_t v1, uint16_t v2, uint16_t v3){
+void Post_office( float *buffer_float){
   uint8_t TxBufferIndex = 0;
   uint8_t temp[2];
-  uint16_t buffer[12] = {0x0FFF,0x0FFF, 0x0FFF,0x0FFF, 0x0FFF, 0x0FFF, 0x0FFF, 0x0FFF, 0x0FFF,0x0FFF, 0x0FFF, 0x0FFF};
+  uint8_t j=0;
+  uint8_t jj=0;
+  int intIRdecimal[2];
+  uint16_t buffer[50];
+  float masyvas[11];
+    for(uint8_t x=0; x<11; x++)
+    {   masyvas[x]=*buffer_float;
+        buffer_float++;
+    }
+      
+  for (uint8_t x=0;x<50;x++)
+      buffer[x]=0xFFF;
+
+  while (masyvas[j]!=0xFFF ){
     
-  //Maskavimas  V1
-  temp[0] = v1 & 0xFF;
-  temp[1] = (v1 >> 8) & 0xFF;
+    intIRdecimal[0] = (int)masyvas[j];
+    intIRdecimal[1] = ((int)(masyvas[j]*N_DECIMAL_POINTS_PRECISION)%N_DECIMAL_POINTS_PRECISION);
+    
+    for (jj=0; jj<2; jj++){
+      temp[0] = intIRdecimal[jj] & 0xFF;
+      temp[1] = (intIRdecimal[jj] >> 8) & 0xFF;
   
-  if((temp[0] == 0xFE) || (temp[0] == 0xC0) || (temp[0] == 0xC1)){
-    buffer[TxBufferIndex++] = 0xFE;
-    buffer[TxBufferIndex++] = temp[0];
-  }else{
-    buffer[TxBufferIndex++] = temp[0];  }
-  if((temp[1] == 0xFE) || (temp[1] == 0xC0) || (temp[1] == 0xC1)){
-    buffer[TxBufferIndex++] = 0xFE;
-    buffer[TxBufferIndex++] = temp[1];
-  }else{
-    buffer[TxBufferIndex++] = temp[1];  }
-    //Maskavimas  V2
-  temp[0] = v2 & 0xFF;
-  temp[1] = (v2 >> 8) & 0xFF;
-  
-  if((temp[0] == 0xFE) || (temp[0] == 0xC0) || (temp[0] == 0xC1)){
-    buffer[TxBufferIndex++] = 0xFE;
-    buffer[TxBufferIndex++] = temp[0];
-  }else{
-    buffer[TxBufferIndex++] = temp[0];  }
-  if((temp[1] == 0xFE) || (temp[1] == 0xC0) || (temp[1] == 0xC1)){
-    buffer[TxBufferIndex++] = 0xFE;
-    buffer[TxBufferIndex++] = temp[1];
-  }else{
-    buffer[TxBufferIndex++] = temp[1];  }
-    //Maskavimas  V3
-  temp[0] = v3 & 0xFF;
-  temp[1] = (v3 >> 8) & 0xFF;
-  
-  if((temp[0] == 0xFE) || (temp[0] == 0xC0) || (temp[0] == 0xC1)){
-    buffer[TxBufferIndex++] = 0xFE;
-    buffer[TxBufferIndex++] = temp[0];
-  }else{
-    buffer[TxBufferIndex++] = temp[0];  }
-  if((temp[1] == 0xFE) || (temp[1] == 0xC0) || (temp[1] == 0xC1)){
-    buffer[TxBufferIndex++] = 0xFE;
-    buffer[TxBufferIndex++] = temp[1];
-  }else{
-    buffer[TxBufferIndex++] = temp[1];  }
-  //_________end_maskavimas
-  
-  
+      if((temp[0] == 0xFE) || (temp[0] == 0xC0) || (temp[0] == 0xC1)){
+        buffer[TxBufferIndex++] = 0xFE;
+        buffer[TxBufferIndex++] = temp[0];
+      }else{
+        buffer[TxBufferIndex++] = temp[0];  }
+      if((temp[1] == 0xFE) || (temp[1] == 0xC0) || (temp[1] == 0xC1)){
+         buffer[TxBufferIndex++] = 0xFE;
+        buffer[TxBufferIndex++] = temp[1];
+      }else{
+        buffer[TxBufferIndex++] = temp[1];  } 
+     }
+    j=j+1;
+  }
+    
   while(USART_GetFlagStatus(USART2, USART_FLAG_TXE) == RESET);
     USART_SendData(USART2, 0xC0);
     
@@ -556,8 +528,70 @@ void Post_office( uint16_t v1, uint16_t v2, uint16_t v3){
     USART_SendData(USART2, buffer[TxBufferIndex]);
     TxBufferIndex++;
   }  
+  while(USART_GetFlagStatus(USART2, USART_FLAG_TXE) == RESET);
+    USART_SendData(USART2, 0xC1);
 }
 
+
+float termocompensation(float ADC_temperature){ //is ADC_temp gauna internal Vref itampa mV
+    float result;
+    //result= -0.00007*ADC_temperature*ADC_temperature + 0.1935*ADC_temperature + 1103.9;
+    result= -0.008*ADC_temperature +1243;
+    //ADC_Vref_komp=(float)Vref + (-0.0245)*(float)Vtemp + (0.000014 * (float)(Vtemp*Vtemp)); 
+  return result;
+}
+
+float temperature(float ADC_vdd, float ADC_temperature){ //______________________Pataisyti
+    float tempe_degree;
+    float tempe_mV;
+    tempe_mV=(ADC_vdd/4095)*ADC_temperature; 
+    tempe_degree=- 0.24*tempe_mV +360 ; 
+    //tempe_degree=-0.0008*tempe_mV*tempe_mV + 1.7501*tempe_mV - 872.8 ; 
+  return tempe_degree;
+}
+
+float thermo_Vref(float temperatura_degree){ //______________________Pataisyti
+    float result;
+      result = -0.0025*temperatura_degree+3000.45;
+//    result = -0.012*temperatura_degree+3000.45; 
+//    result = -0.0054*temperatura_degree+3000.45;   
+//    result = temperatura_degree *0.067+2484.4;   
+//    result = temperatura_degree *0.065+2484.4;
+//    result = temperatura_degree*0.07+2577.5;
+  return result;
+}
+
+float Get_8of10AVG(float buffer[] )
+{
+  float average = 0;
+  float min = buffer[0];
+  uint8_t minIND=0;
+  float max = buffer[9];
+  uint8_t maxIND=9;
+
+  for(uint8_t i = 0; i < 10; i++)
+  {
+    if (buffer[i]<min){
+      min=buffer[i];
+      minIND=i;
+    }
+    if (buffer[i]>max){
+      max=buffer[i];
+      maxIND=i;
+    }
+  }
+  if (minIND==maxIND)
+    maxIND=minIND+1;
+  buffer[minIND]=0;
+  buffer[maxIND]=0;
+  
+  for(uint8_t i = 0; i < 10; i++)
+    average +=buffer[i];
+  
+    average /= 8;
+
+  return average; 
+}
 
 /**
   * @brief  Configure SDADC1 channel 4P in Single Ended Zero Reference mode using
@@ -719,8 +753,6 @@ void DMA_initSDADC(void){
   NVIC_InitStructure.NVIC_IRQChannelCmd = ENABLE;
   NVIC_Init(&NVIC_InitStructure);
   
-
-   
     /* Enable DMA */
   SDADC_DMAConfig(SDADC1, SDADC_DMATransfer_Regular, ENABLE);
   
@@ -777,7 +809,6 @@ static uint32_t SDADC3_Config(void)
     /* INITRDY flag can not set */
     return 1;
   }
-  
 
   /* Analog Input configuration conf0: use single ended zero reference */
   SDADC_AINStructure.SDADC_InputMode = SDADC_InputMode_SEZeroReference;
@@ -864,7 +895,7 @@ void USART2_Configuration(void)
   NVIC_Init(&NVIC_InitStructure);*/
 }
 
-void ADC_init(  )
+void ADC_init( )
 { 
  
   /* ADCCLK = PCLK2/4 */
@@ -936,67 +967,6 @@ void ADC_init(  )
   ADC_Cmd(ADC1, ENABLE);     
 }
 
-float termocompensation(float ADC_temperature){ //is ADC_temp gauna internal Vref itampa mV
-    float result;
-    //result= -0.00007*ADC_temperature*ADC_temperature + 0.1935*ADC_temperature + 1103.9;
-    result= -0.008*ADC_temperature +1243;
-    //ADC_Vref_komp=(float)Vref + (-0.0245)*(float)Vtemp + (0.000014 * (float)(Vtemp*Vtemp)); 
-  return result;
-}
-
-float temperature(float ADC_vdd, float ADC_temperature){ //______________________Pataisyti
-    float tempe_degree;
-    float tempe_mV;
-    tempe_mV=(ADC_vdd/4095)*ADC_temperature; 
-    tempe_degree=- 0.24*tempe_mV +360 ; 
-    //tempe_degree=-0.0008*tempe_mV*tempe_mV + 1.7501*tempe_mV - 872.8 ; 
-  return tempe_degree;
-}
-
-float thermo_Vref(float temperatura_degree){ //______________________Pataisyti
-    float result;
-      result = -0.0025*temperatura_degree+3000.45;
-//    result = -0.012*temperatura_degree+3000.45; 
-//    result = -0.0054*temperatura_degree+3000.45;   
-//    result = temperatura_degree *0.067+2484.4;   
-//    result = temperatura_degree *0.065+2484.4;
-//    result = temperatura_degree*0.07+2577.5;
-  return result;
-}
-
-float Get_8of10AVG(float buffer[] )
-{
-  float average = 0;
-  float min = buffer[0];
-  uint8_t minIND=0;
-  float max = buffer[9];
-  uint8_t maxIND=9;
-
-
-  for(uint8_t i = 0; i < 10; i++)
-  {
-    if (buffer[i]<min){
-      min=buffer[i];
-      minIND=i;
-    }
-    if (buffer[i]>max){
-      max=buffer[i];
-      maxIND=i;
-    }
-  }
-  if (minIND==maxIND)
-    maxIND=minIND+1;
-  buffer[minIND]=0;
-  buffer[maxIND]=0;
-  
-  for(uint8_t i = 0; i < 10; i++)
-    average +=buffer[i];
-  
-    average /= 8;
-
-  return average; 
-}
-
 void GPIO_init(){
   
   GPIO_InitTypeDef GPIO_InitStructure;
@@ -1034,10 +1004,7 @@ void GPIO_init(){
   GPIO_InitStructure.GPIO_OType = GPIO_OType_PP;
   GPIO_InitStructure.GPIO_PuPd = GPIO_PuPd_NOPULL;
   GPIO_Init(GPIOB, &GPIO_InitStructure);
-  
-  
-   
-}
+  }
 
 void InitializeTimer(uint32_t PWM_PERIOD, uint32_t PWM_PERIOD_5V)
 {
@@ -1061,8 +1028,7 @@ void InitializeTimer(uint32_t PWM_PERIOD, uint32_t PWM_PERIOD_5V)
     timerInitStructure.TIM_ClockDivision = TIM_CKD_DIV1;
     timerInitStructure.TIM_RepetitionCounter = 0;
     TIM_TimeBaseInit(TIM2, &timerInitStructure);
-    TIM_Cmd(TIM2, ENABLE);
-    
+    TIM_Cmd(TIM2, ENABLE);  
 }
 
 void InitializePWMChannel()
