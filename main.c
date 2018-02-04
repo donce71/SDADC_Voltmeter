@@ -211,9 +211,9 @@ int main(void)
 /* Transmit */
       if (flag_send==1){
         
-        RxBuffer[0]=Vdd5V_AVG;
-        RxBuffer[1]=DUTY_5V;
-//       RxBuffer[3]=ADC_Vref;
+        RxBuffer[0]=AVG_VrefMv;
+        RxBuffer[1]=AVG_VsensorMv;
+        RxBuffer[3]=DUTY;
 //       RxBuffer[4]=ADC_Vtemp;
         Post_office( RxBuffer);
 
@@ -286,11 +286,7 @@ float PI_con_5V(float value, float target, float Kp, float Ki)
       output = PWM_PERIOD_5V;
   if( output < 0 )
        output = 0;
-  
-  RxBuffer[2]=error;
-  RxBuffer[3]=integral2/10;
-  RxBuffer[4]=Kp*error;
-  
+    
   return output; 
 }
 
