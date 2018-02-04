@@ -1000,7 +1000,7 @@
                     <item>AVG_VrefMv</item>
                     <item>AVG_VsensorMv</item>
                     <item>step_mv</item>
-                    <item></item>
+                    <item />
                 </expressions>
                 <col-names>
                     <item>Expression</item>
