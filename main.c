@@ -170,8 +170,8 @@ int main(void)
   vref_internal_calibrated = *((uint16_t *)(VREF_INTERNAL_BASE_ADDRESS)); //ADC reiksme kai Vdd=3.3V
   Vref_internal_itampa= (vref_internal_calibrated)*3300/ 4095; //Vidinio Vref itampa
   Vref_internal_itampa= 1229;                // Kalibruojant su PICOLOG
-  targetVoltage=1000;
-  //targetVoltage = sensor_init();
+  //targetVoltage=1000;
+  targetVoltage = sensor_init();
 
  
   /* Test DMA1 TC flag */
@@ -213,6 +213,7 @@ int main(void)
         RxBuffer[1]=AVG_VsensorMv;
         RxBuffer[2]=Vdd5V_AVG;
         RxBuffer[3]=DUTY;
+        RxBuffer[4]=Tempe;
         Post_office( RxBuffer);
 
         flag_send=0;
