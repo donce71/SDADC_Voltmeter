@@ -743,14 +743,14 @@ void DMA_initSDADC(void){
   /* DMA2 Channel1 enable */
   DMA_Cmd(DMA2_Channel3, ENABLE);
   
-  DMA_ITConfig(DMA2_Channel3, DMA_IT_TC, ENABLE);
+  /*DMA_ITConfig(DMA2_Channel3, DMA_IT_TC, ENABLE);
   
   NVIC_InitStructure.NVIC_IRQChannel = DMA2_Channel3_IRQn;
   NVIC_InitStructure.NVIC_IRQChannelPreemptionPriority = 0;
   NVIC_InitStructure.NVIC_IRQChannelSubPriority = 0;
   NVIC_InitStructure.NVIC_IRQChannelCmd = ENABLE;
   NVIC_Init(&NVIC_InitStructure);
-  
+  */
     /* Enable DMA */
   SDADC_DMAConfig(SDADC1, SDADC_DMATransfer_Regular, ENABLE);
   

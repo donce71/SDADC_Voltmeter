@@ -205,6 +205,7 @@ void SDADC3_IRQHandler(void)
     InjectedConvData3Ch7 = SDADC_GetInjectedConversionValue(SDADC3, &ChannelIndex);  
   } 
 }
+/*
 uint32_t cnt = 0;
 void DMA2_Channel3_IRQHandler(void)
 {
@@ -214,6 +215,7 @@ void DMA2_Channel3_IRQHandler(void)
     cnt++;
   }
 }
+*/
 /**
   * @brief  This function handles PPP interrupt request.
   * @param  None
