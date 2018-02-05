@@ -2,8 +2,8 @@
   ******************************************************************************
   * @file    SDADC/SDADC_Voltmeter/main.c 
   * @author  Donatas
-  * @version V1.13.2
-  * @date    04-February-2018
+  * @version V1.13.3
+  * @date    05-February-2018
   * @brief   Main program body
   * Rx - PA2  TX - PA3, UART2 
   * SDADC PB2 
@@ -113,6 +113,7 @@ float P_tu=2;
 float I_tu=0;
 uint8_t flag_calibruoti=0;
 float RxBuffer[11]={0xFFF,0xFFF,0xFFF,0xFFF,0xFFF,0xFFF,0xFFF,0xFFF,0xFFF,0xFFF,0xFFF};
+uint8_t calibravimo_rezult=0;
 /*
 
 /* Private function prototypes -----------------------------------------------*/
@@ -169,10 +170,8 @@ int main(void)
   vref_internal_calibrated = *((uint16_t *)(VREF_INTERNAL_BASE_ADDRESS)); //ADC reiksme kai Vdd=3.3V
   Vref_internal_itampa= (vref_internal_calibrated)*3300/ 4095; //Vidinio Vref itampa
   Vref_internal_itampa= 1229;                // Kalibruojant su PICOLOG
-  //targetVref_mazas=10;          
-  //targetVoltage=targetVref_mazas*11.7;
-  targetVoltage=1800;
-  // targetVoltage = sensor_init();
+  targetVoltage=1000;
+  //targetVoltage = sensor_init();
 
  
   /* Test DMA1 TC flag */
@@ -194,8 +193,7 @@ int main(void)
     {
 /*  KALIBRAVIMAS */      
       if (flag_calibruoti==1){
-        if (offset_calib()>50){  //visi output daugiau nei 50 yra klaidos
-          while(1);         } //Nepavyko sukalibtuoti
+        calibravimo_rezult=offset_calib();//visi output daugiau nei 50decimal yra klaidos
         flag_calibruoti=0;
       }
 
@@ -207,14 +205,14 @@ int main(void)
       ChangePWM_5V_duty(DUTY_5V);
       DUTY=PI_controller(VrefMv,targetVoltage,10,20);   //30,0.2   0.6,0.1    10,20
       ChangePWM_duty( PWM_PERIOD - DUTY );
-       
+            
 /* Transmit */
       if (flag_send==1){
         
         RxBuffer[0]=AVG_VrefMv;
         RxBuffer[1]=AVG_VsensorMv;
+        RxBuffer[2]=Vdd5V_AVG;
         RxBuffer[3]=DUTY;
-//       RxBuffer[4]=ADC_Vtemp;
         Post_office( RxBuffer);
 
         flag_send=0;
@@ -249,20 +247,30 @@ float PI_controller(float value, float target, float Kp, float Ki)
 
 float PI_con_Vsensor(float value, float target, float Kp, float Ki)
 { 
+  
   float output=0;
   float error=0;
   float skirtumas=0;
 
   error=target-value;
-  if ( ((DUTY>=PWM_PERIOD) || (DUTY<=0))!=1 ){
-    integral3 = integral3 + (error);} 
+  if ( ((DUTY<PWM_PERIOD) && (DUTY>0)) && (Ki!=0) ){
+    integral3 = integral3 + (error)/10;}       //reikia padauginti is iteration period______DEMESIO!!!!!!!!!!!!!!!!
+  output= (Kp*error+Ki*integral3);
   
-  output= (Kp*error+Ki*integral3)+25000;
-  
+      //apsauga nuo integral suoliu, RIBAS reikia parinkti pagal matavimo diapazona
+  if ((DUTY==0 || DUTY==PWM_PERIOD) && (error>1500 || error<-1500)  )
+      integral=0;
+     
   if( output > PWM_PERIOD )
       output = PWM_PERIOD;
   if( output < 0 )
        output = 0;
+  
+        RxBuffer[0]=AVG_VrefMv;
+        RxBuffer[1]=AVG_VsensorMv;
+        RxBuffer[2]=DUTY;
+        RxBuffer[3]=integral3;
+        RxBuffer[4]=error;        
   
   return output; 
 }
@@ -317,13 +325,13 @@ uint8_t offset_calib (void){
   
   uint8_t output=0;
   uint32_t i=0;
-  uint32_t j=0;
   uint8_t flag_baigta=0;
   int8_t offset_poliarumas=0;
   float refPWM_target;
   
      /* local variable definition */
   uint8_t state = 1;
+  DUTY=0;
 
    while (flag_baigta==0){
      
@@ -341,16 +349,12 @@ uint8_t offset_calib (void){
          
       case 2 : //algoritmas kai offset neigiamas
          // valdiklis su target 100mV, o matuojama itampa yra AVG_Vsensor
-        for( i=1;i<15000;i++){
+        for( i=1;i<3000;i++){                           //___________________3000 apie 10sekundziu
          measureALL();
-         DUTY=PI_con_Vsensor(AVG_VsensorMv, 100, 0.003, 0.003);
-         ChangePWM_duty( PWM_PERIOD - DUTY ); 
-      /*   
-         integerPart = (int)AVG_VsensorMv;
-         decimalPart = ((int)(AVG_VsensorMv*N_DECIMAL_POINTS_PRECISION)%N_DECIMAL_POINTS_PRECISION);
-         Post_office( integerPart,decimalPart,DUTY); //Paketas 2
-      */   
+         DUTY=PI_con_Vsensor(VsensorMv, 100, 0.5, 1.5); // target 50mV  0.2 1
+         ChangePWM_duty( PWM_PERIOD - DUTY );
          Delay(2);
+         Post_office( RxBuffer);
         }
         if (AVG_VsensorMv>98 && AVG_VsensorMv<102){
           output=1; // gerai sukalibruota neigiamas offset
@@ -375,16 +379,12 @@ uint8_t offset_calib (void){
          break;
          
       case 4 ://algoritmas kai offset teigiamas
-         for( i=1;i<15000;i++){
+         for( i=1;i<3000;i++){               //_________________________pamazinti laika
           measureALL();
-          DUTY=PI_con_Vsensor(AVG_VsensorMv, 3180, 0.01, 0.003); // target 3.18V
+          DUTY=PI_con_Vsensor(VsensorMv, 3180, 0.2, 1); // target 3.18V  0.2 1
           ChangePWM_duty( PWM_PERIOD - DUTY ); 
-         
-      /*   integerPart = (int)AVG_VsensorMv;
-         decimalPart = ((int)(AVG_VsensorMv*N_DECIMAL_POINTS_PRECISION)%N_DECIMAL_POINTS_PRECISION);
-         Post_office( integerPart,decimalPart,DUTY); //Paketas 2
-      */   
           Delay(2);
+          Post_office( RxBuffer);
           }
          if (AVG_VsensorMv>3178 && AVG_VsensorMv<3182){
           output=4; // gerai sukalibruotas teigiamas offset
@@ -439,7 +439,8 @@ void measureALL(void)
       VrefMv =    (SDADCData_Tab[2] + 32768) * step_mv;
       
       //5 Vdd matavimas
-      Vdd5V =    ((InjectedConvData3Ch7 + 32768) * step_mv)/0.6175; //su Gwinstek matuojant 0.6175 atitnka 5V, kai varzos 2.4K ir 3.9K
+      //      Vdd5V =    ((InjectedConvData3Ch7 + 32768) * step_mv)/0.6175; //su Gwinstek matuojant 0.6175 atitnka 5V, kai varzos 2.4K ir 3.9K: Multiplexer
+      Vdd5V =    ((InjectedConvData3Ch7 + 32768) * step_mv)/0.614308; //su Gwinstek matuojant  atitnka 5V, kai varzos 2.4K ir 3.9K : INA188
       Vdd5V_AVG = Vdd5V_AVG + (Vdd5V - Vdd5V_AVG)/200;
       
 /* vidurkinimas Vsensor*/
@@ -743,14 +744,14 @@ void DMA_initSDADC(void){
   /* DMA2 Channel1 enable */
   DMA_Cmd(DMA2_Channel3, ENABLE);
   
-  DMA_ITConfig(DMA2_Channel3, DMA_IT_TC, ENABLE);
+  /*DMA_ITConfig(DMA2_Channel3, DMA_IT_TC, ENABLE);
   
   NVIC_InitStructure.NVIC_IRQChannel = DMA2_Channel3_IRQn;
   NVIC_InitStructure.NVIC_IRQChannelPreemptionPriority = 0;
   NVIC_InitStructure.NVIC_IRQChannelSubPriority = 0;
   NVIC_InitStructure.NVIC_IRQChannelCmd = ENABLE;
   NVIC_Init(&NVIC_InitStructure);
-  
+  */
     /* Enable DMA */
   SDADC_DMAConfig(SDADC1, SDADC_DMATransfer_Regular, ENABLE);
   
