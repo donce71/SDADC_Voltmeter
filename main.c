@@ -2,8 +2,8 @@
   ******************************************************************************
   * @file    SDADC/SDADC_Voltmeter/main.c 
   * @author  Donatas
-  * @version V1.23.2
-  * @date    04-February-2018
+  * @version V1.23.3
+  * @date    05-February-2018
   * @brief   Main program body
   * Rx - PA2  TX - PA3, UART2 
   * SDADC PB2 
@@ -170,9 +170,8 @@ int main(void)
   vref_internal_calibrated = *((uint16_t *)(VREF_INTERNAL_BASE_ADDRESS)); //ADC reiksme kai Vdd=3.3V
   Vref_internal_itampa= (vref_internal_calibrated)*3300/ 4095; //Vidinio Vref itampa
   Vref_internal_itampa= 1229;                // Kalibruojant su PICOLOG
-  //targetVref_mazas=10;          
-  //targetVoltage=targetVref_mazas*11.7;
-  targetVoltage = sensor_init();
+  targetVoltage=1000;
+  //targetVoltage = sensor_init();
 
  
   /* Test DMA1 TC flag */
@@ -206,15 +205,14 @@ int main(void)
       ChangePWM_5V_duty(DUTY_5V);
       DUTY=PI_controller(VrefMv,targetVoltage,10,20);   //30,0.2   0.6,0.1    10,20
       ChangePWM_duty( PWM_PERIOD - DUTY );
-      
-      
+            
 /* Transmit */
       if (flag_send==1){
         
         RxBuffer[0]=AVG_VrefMv;
         RxBuffer[1]=AVG_VsensorMv;
         RxBuffer[2]=Vdd5V_AVG;
-//       RxBuffer[4]=ADC_Vtemp;
+        RxBuffer[3]=DUTY;
         Post_office( RxBuffer);
 
         flag_send=0;
