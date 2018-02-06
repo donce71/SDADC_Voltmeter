@@ -170,7 +170,7 @@ int main(void)
   vref_internal_calibrated = *((uint16_t *)(VREF_INTERNAL_BASE_ADDRESS)); //ADC reiksme kai Vdd=3.3V
   Vref_internal_itampa= (vref_internal_calibrated)*3300/ 4095; //Vidinio Vref itampa
   Vref_internal_itampa= 1229;                // Kalibruojant su PICOLOG
-  //targetVoltage=1000;
+  //targetVoltage=1750.8;
   targetVoltage = sensor_init();
 
  
@@ -194,6 +194,7 @@ int main(void)
 /*  KALIBRAVIMAS */      
       if (flag_calibruoti==1){
         calibravimo_rezult=offset_calib();//visi output daugiau nei 50decimal yra klaidos
+        targetVoltage = sensor_init();
         flag_calibruoti=0;
       }
 
@@ -212,8 +213,8 @@ int main(void)
         RxBuffer[0]=AVG_VrefMv;
         RxBuffer[1]=AVG_VsensorMv;
         RxBuffer[2]=Vdd5V_AVG;
-        RxBuffer[3]=DUTY;
-        RxBuffer[4]=Tempe+100;
+        RxBuffer[3]=Tempe+100;
+        RxBuffer[4]=step_mv*1000;
         Post_office( RxBuffer);
 
         flag_send=0;
@@ -350,7 +351,7 @@ uint8_t offset_calib (void){
          
       case 2 : //algoritmas kai offset neigiamas
          // valdiklis su target 100mV, o matuojama itampa yra AVG_Vsensor
-        for( i=1;i<3000;i++){                           //___________________3000 apie 10sekundziu
+        for( i=1;i<7000;i++){                           //___________________3000 apie 10sekundziu
          measureALL();
          DUTY=PI_con_Vsensor(VsensorMv, 100, 0.5, 1.5); // target 50mV  0.2 1
          ChangePWM_duty( PWM_PERIOD - DUTY );
@@ -372,7 +373,7 @@ uint8_t offset_calib (void){
          ChangePWM_duty( PWM_PERIOD - 50000 );  //Vref = 3300mV
          Delay(100); //ms
          measureALL();
-         if (VsensorMv>3180)
+         if (((SDADCData_Tab[2] + 32768) * step_mv_new)>3180)
            state=4;  // offset tikrai  teigiamas
          else {
            output=97; //klaida, ofset neveikia kaip teigiamas
@@ -380,14 +381,14 @@ uint8_t offset_calib (void){
          break;
          
       case 4 ://algoritmas kai offset teigiamas
-         for( i=1;i<3000;i++){               //_________________________pamazinti laika
+         for( i=1;i<7000;i++){               //_________________________pamazinti laika
           measureALL();
-          DUTY=PI_con_Vsensor(VsensorMv, 3180, 0.2, 1); // target 3.18V  0.2 1
+          DUTY=PI_con_Vsensor(VsensorMv, 3100, 0.2, 1); // target 3.18V  0.2 1
           ChangePWM_duty( PWM_PERIOD - DUTY ); 
           Delay(2);
           Post_office( RxBuffer);
           }
-         if (AVG_VsensorMv>3178 && AVG_VsensorMv<3182){
+         if (AVG_VsensorMv>3100-2 && AVG_VsensorMv<3100+2){
           output=4; // gerai sukalibruotas teigiamas offset
           refPWM_target= AVG_VrefMv;
           offset_poliarumas=2;
@@ -433,8 +434,7 @@ void measureALL(void)
        
 /* Compute the input voltage */   
       step_mv_new = External_Vref /(SDADCData_Tab[1]+32768);
-      step_mv = step_mv + (step_mv_new - step_mv)/100;
-      step_mv=step_mv_new;
+      step_mv = step_mv + (step_mv_new - step_mv)/1000;
       
       VsensorMv = (SDADCData_Tab[0] + 32768) * step_mv;
       VrefMv =    (SDADCData_Tab[2] + 32768) * step_mv;
@@ -551,12 +551,11 @@ float temperature(float ADC_vdd, float ADC_temperature){ //_____________________
 
 float thermo_Vref(float temperatura_degree){ //______________________Pataisyti
     float result;
+    if (temperatura_degree>25)
       result = -0.0025*temperatura_degree+3000.45;
-//    result = -0.012*temperatura_degree+3000.45; 
-//    result = -0.0054*temperatura_degree+3000.45;   
-//    result = temperatura_degree *0.067+2484.4;   
-//    result = temperatura_degree *0.065+2484.4;
-//    result = temperatura_degree*0.07+2577.5;
+    else
+      result = 0.0025*temperatura_degree+3000.45;
+    
   return result;
 }
 
