@@ -2,8 +2,8 @@
   ******************************************************************************
   * @file    SDADC/SDADC_Voltmeter/main.c 
   * @author  Donatas
-  * @version V1.23.3
-  * @date    05-February-2018
+  * @version V1.23.4
+  * @date    06-February-2018
   * @brief   Main program body
   * Rx - PA2  TX - PA3, UART2 
   * SDADC PB2 
@@ -213,7 +213,7 @@ int main(void)
         RxBuffer[1]=AVG_VsensorMv;
         RxBuffer[2]=Vdd5V_AVG;
         RxBuffer[3]=DUTY;
-        RxBuffer[4]=Tempe;
+        RxBuffer[4]=Tempe+100;
         Post_office( RxBuffer);
 
         flag_send=0;
