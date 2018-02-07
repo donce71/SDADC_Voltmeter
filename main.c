@@ -87,6 +87,7 @@ float Vdd5V= 5000;
 float Vdd5V_AVG= 5000;
 float V_3v3_calculated=0;
 float AVG_V_3v3_calculated=3300;
+float Thermo_targetVpwm=0;
 
 /* Vidurkinimo variables */
 uint16_t sumavimo_index1=0; 
@@ -131,6 +132,7 @@ float Get_8of10AVG(float buffer[]);
 float termocompensation(float Vtemp);
 float temperature(float ADC_vdd, float ADC_temperature);
 float thermo_Vref(float temperatura_degree);
+float Vrefpwm_thermo(float temp_deg, float Vrefpwm_target);
 
 void Post_office( float *buffer_float);
 void ChangePWM_duty( uint16_t PULSE );
@@ -170,8 +172,9 @@ int main(void)
   vref_internal_calibrated = *((uint16_t *)(VREF_INTERNAL_BASE_ADDRESS)); //ADC reiksme kai Vdd=3.3V
   Vref_internal_itampa= (vref_internal_calibrated)*3300/ 4095; //Vidinio Vref itampa
   Vref_internal_itampa= 1229;                // Kalibruojant su PICOLOG
-  //targetVoltage=1750.8;
   targetVoltage = sensor_init();
+  //targetVoltage=3168; //________________________________________________________ISTRINTI
+
 
  
   /* Test DMA1 TC flag */
@@ -200,11 +203,12 @@ int main(void)
 
 /* ALL ADC AND SDADC MEASUREMENTS */
         measureALL();
+      Thermo_targetVpwm=Vrefpwm_thermo( Tempe, targetVoltage);
             
 /* Feedback: DUTY keiciu tik kas 100 matavimu, nes naudoju Vref AVG reiksme, kuri kinta tik cia if*/
       DUTY_5V = PI_con_5V(Vdd5V, Vdd5V_target, 10,10);
       ChangePWM_5V_duty(DUTY_5V);
-      DUTY=PI_controller(VrefMv,targetVoltage,10,20);   //30,0.2   0.6,0.1    10,20
+      DUTY=PI_controller(VrefMv,Thermo_targetVpwm,5,10);   //30,0.2   0.6,0.1    10,20
       ChangePWM_duty( PWM_PERIOD - DUTY );
             
 /* Transmit */
@@ -212,9 +216,11 @@ int main(void)
         
         RxBuffer[0]=AVG_VrefMv;
         RxBuffer[1]=AVG_VsensorMv;
-        RxBuffer[2]=Vdd5V_AVG;
+        RxBuffer[2]=DUTY;
         RxBuffer[3]=Tempe+100;
         RxBuffer[4]=step_mv*1000;
+        RxBuffer[5]=External_Vref;
+        RxBuffer[6]=Thermo_targetVpwm;
         Post_office( RxBuffer);
 
         flag_send=0;
@@ -550,13 +556,21 @@ float temperature(float ADC_vdd, float ADC_temperature){ //_____________________
 }
 
 float thermo_Vref(float temperatura_degree){ //______________________Pataisyti
-    float result;
-    if (temperatura_degree>25)
-      result = -0.0025*temperatura_degree+3000.45;
-    else
-      result = 0.0025*temperatura_degree+3000.45;
-    
-  return result;
+    float result1;
+    result1 = -0.0025*temperatura_degree+3000.45;
+  return result1;
+}
+
+float Vrefpwm_thermo(float temp_deg, float Vrefpwm_target){ 
+  float result2;
+  float norimas_Verfmazasis_prie_25C;
+  float thermo_ratio;
+  
+  thermo_ratio= temp_deg*temp_deg*(-0.000001)+temp_deg*0.00016+12.09;
+  norimas_Verfmazasis_prie_25C= Vrefpwm_target/12.093;
+  result2=norimas_Verfmazasis_prie_25C*thermo_ratio;
+  
+  return result2;
 }
 
 float Get_8of10AVG(float buffer[] )
