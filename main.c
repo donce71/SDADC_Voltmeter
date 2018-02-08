@@ -566,10 +566,15 @@ float Vrefpwm_thermo(float temp_deg, float Vrefpwm_target){
   float norimas_Verfmazasis_prie_25C;
   float thermo_ratio;
   
-  thermo_ratio= temp_deg*temp_deg*(-0.000001)+temp_deg*0.00016+12.09;
-  norimas_Verfmazasis_prie_25C= Vrefpwm_target/12.093;
-  result2=norimas_Verfmazasis_prie_25C*thermo_ratio;
+//  thermo_ratio= temp_deg*temp_deg*(-0.000001)+temp_deg*0.00016+12.09;
+  thermo_ratio=temp_deg*0.000148+12.0824;
+  norimas_Verfmazasis_prie_25C= Vrefpwm_target/12.0869;
   
+  if (temp_deg<30)
+      result2=norimas_Verfmazasis_prie_25C*thermo_ratio;
+  else
+      result2=norimas_Verfmazasis_prie_25C*12.0869;
+//  result2=norimas_Verfmazasis_prie_25C*thermo_ratio;
   return result2;
 }
 
