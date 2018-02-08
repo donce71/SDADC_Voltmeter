@@ -33,7 +33,8 @@
 #include "stm32f37x.h"
 #include "stm32373c_eval.h"
 #include <stdio.h>
-
+#include "string.h" // for memset
+#include <stddef.h>
 /* Exported types ------------------------------------------------------------*/
 /* Exported constants --------------------------------------------------------*/
 
@@ -68,8 +69,51 @@
 #define SDADC1_DR_Address           0x40016060
 #define variable_ADRESS             0x08004000
 
+// -----------------------     LIN    ------------------------------------//
+/* Private define  */
+#define bool _Bool
+#define TRUE  1
+#define FALSE 0
+// frame id message define:
+#define SENSOR_INFO			0x30
+#define SENSOR_receive_OFFSET	            0x31
+#define SENSOR_receive_SENSITIVITY		0x32
+#define SENSOR_transmitt_OFFSET		0x33
+#define SENSOR_transmitt_SENSITIVITY	0x34
 
+// for USART init. RCC USART ijungimas ner define, surast ir pakeist kode.
+#define LIN_USART       USART2
+#define LIN_USART_IRQ   USART2_IRQn
+#define LIN_IRQHandler	USART2_IRQHandler
+/*
+ *  Frame ID indicate about data length:
+ *  0  - 31 '2 bytes'
+ *  62 - 47	'4 bytes'
+ *  48 - 63 '8 bytes'
+ *  Bytes 60 - 63 are used for diagnostic frames.
+ */
+/* Private macro */
+/* Private variables  for LIN commmunication*/
+extern bool  LIN_frame_started ; // flag, frame starts after reak and sync byte.
+extern uint8_t LIN_identifier; // six bits for frame identifier, value range 0 to 63 ; from this value depends data length.
+extern uint8_t LIN_protected_identifier; // received frame ID with parity bits
+extern bool LIN_header_received;
+extern bool LIN_slave_is_subscriber; // by default device is publisher. If calibration command received switch to subscribe mode.
+extern uint8_t LIN_RX_received_buffer[9], LIN_rx_cnt; // then slave act as subscriber
+extern uint8_t LIN_transmission_active ;
+extern uint8_t LIN_TX_buffer[9], LIN_tx_cnt, LIN_tx_total; // slave act as publisher
+extern bool LIN_response_received ; // flag indicates then device get full frame response.
+extern uint8_t Parse_value_switch; //for LIN subscriber values switch parsing
+extern uint8_t debug_masyvas[10];
+//Parse_value_switch = none;
 
+ void USART_Send_data(uint8_t *buffer, uint32_t length);
+/* Private function prototypes for application */
+ void LIN_send_data (uint8_t *buffer, uint8_t length);
+ void LIN_start_transmission(uint8_t *buffer, uint8_t length);
+ uint8_t LIN_checksum_enhanced(uint8_t prot_ID, uint8_t *buffer, uint8_t length);
+ uint8_t LIN_checksum_classic(uint8_t prot_ID, uint8_t *buffer, uint8_t length);
+ uint8_t LIN_validate_response(uint8_t data_length);
 /* Exported macro ------------------------------------------------------------*/
 /* Exported functions ------------------------------------------------------- */
 void TimingDelay_Decrement(void);

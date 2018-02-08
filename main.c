@@ -29,6 +29,7 @@
   * 2018-02-02 SDADC skaitomas su DMA ir kalibravimo mechanizmas  
   * 2018-02-04 Pradedu rasyti koda plokstei su INA188 stiprintuvais
   * 2018-02-04 Naujas Post Office
+  * 2018-02-08 PWMref target kompensacija (Vref) ir LIN
  ******************************************************************************
   */
 
@@ -43,17 +44,14 @@
   */
 
 /* Private macro -------------------------------------------------------------*/
-GPIO_InitTypeDef    GPIO_InitStructure;
-USART_InitTypeDef USART_InitStructure;
-NVIC_InitTypeDef NVIC_InitStructure;
-ADC_InitTypeDef     ADC_InitStructure;
-GPIO_InitTypeDef    GPIO_InitStructure;
-DMA_InitTypeDef     DMA_InitStructure;
+GPIO_InitTypeDef        GPIO_InitStructure;
+USART_InitTypeDef       USART_InitStructure;
+NVIC_InitTypeDef        NVIC_InitStructure;
+ADC_InitTypeDef         ADC_InitStructure;
+GPIO_InitTypeDef        GPIO_InitStructure;
+DMA_InitTypeDef         DMA_InitStructure;
 
 /* Private variables ---------------------------------------------------------*/
-int16_t InjectedConvDataCh4 = 0;
-int16_t InjectedConvDataCh8 = 0;
-int16_t InjectedConvDataCh7 = 0;
 int16_t InjectedConvData3Ch7 = 0;
 
 __IO uint32_t TimingDelay = 0;
@@ -115,28 +113,27 @@ float I_tu=0;
 uint8_t flag_calibruoti=0;
 float RxBuffer[11]={0xFFF,0xFFF,0xFFF,0xFFF,0xFFF,0xFFF,0xFFF,0xFFF,0xFFF,0xFFF,0xFFF};
 uint8_t calibravimo_rezult=0;
-/*
+
+/* Private variables  for LIN commmunication*/
+bool  LIN_frame_started = 0; // flag, frame starts after reak and sync byte.
+uint8_t LIN_identifier = 0; // six bits for frame identifier, value range 0 to 63 ; from this value depends data length.
+uint8_t LIN_protected_identifier = 0; // received frame ID with parity bits
+bool LIN_header_received = 0;
+bool LIN_slave_is_subscriber = 0; // by default device is publisher. If calibration command received switch to subscribe mode.
+uint8_t LIN_RX_received_buffer[9] = {0}, LIN_rx_cnt=0; // then slave act as subscriber
+uint8_t LIN_transmission_active = 0;
+uint8_t LIN_TX_buffer[9] = {0}, LIN_tx_cnt=0, LIN_tx_total=0; // slave act as publisher
+bool LIN_response_received = 0; // flag indicates then device get full frame response.
+uint8_t Parse_value_switch = SENSOR_receive_OFFSET; //for LIN subscriber values switch parsing
+uint8_t debug_masyvas[10] = {0x10, 0x11, 0x12, 0x13, 0x14,0x15,0x16,0x17};
 
 /* Private function prototypes -----------------------------------------------*/
-static uint32_t SDADC1_Config(void);
-static uint32_t SDADC3_Config(void);
-void USART2_Configuration(void);
-void RS485(uint8_t direction);
-void GPIO_init(void);
-void InitializeTimer(uint32_t PWM_PERIOD, uint32_t PWM_PERIOD_5V);
-void InitializePWMChannel(void);
-void ADC_init( void );
-void DMA_initSDADC(void);
-void ADC_measure (void);
 float Get_8of10AVG(float buffer[]);
 float termocompensation(float Vtemp);
 float temperature(float ADC_vdd, float ADC_temperature);
 float thermo_Vref(float temperatura_degree);
 float Vrefpwm_thermo(float temp_deg, float Vrefpwm_target);
-
 void Post_office( float *buffer_float);
-void ChangePWM_duty( uint16_t PULSE );
-void ChangePWM_5V_duty( uint16_t PULSE );
 float PI_controller(float value, float target, float Kp, float Ki);
 float PI_con_5V(float value, float target, float Kp, float Ki);
 uint16_t histereze_5V(float value, uint16_t current_PWM);
@@ -144,6 +141,18 @@ uint8_t offset_calib( void );
 float PI_con_Vsensor(float value, float target, float Kp, float Ki);
 void measureALL(void);
 float sensor_init(void);
+
+/* Periptheral function prototypes -------------------------------------------*/
+static uint32_t SDADC1_Config(void);
+static uint32_t SDADC3_Config(void);
+void USART2_Configuration(void);
+void GPIO_init(void);
+void InitializeTimer(uint32_t PWM_PERIOD, uint32_t PWM_PERIOD_5V);
+void InitializePWMChannel(void);
+void ADC_init( void );
+void DMA_initSDADC(void);
+void ChangePWM_duty( uint16_t PULSE );
+void ChangePWM_5V_duty( uint16_t PULSE );
 
 
 int main(void)
@@ -165,7 +174,6 @@ int main(void)
   InitializeTimer(PWM_PERIOD, PWM_PERIOD_5V);
   InitializePWMChannel();
   ADC_init();
-  RS485(TRANSMIT);
   DMA_initSDADC();
 
  
@@ -176,7 +184,6 @@ int main(void)
   //targetVoltage=3168; //________________________________________________________ISTRINTI
 
 
- 
   /* Test DMA1 TC flag */
   while((DMA_GetFlagStatus(DMA1_FLAG_TC1)) == RESET ); 
   /* Clear DMA TC flag */
@@ -202,17 +209,17 @@ int main(void)
       }
 
 /* ALL ADC AND SDADC MEASUREMENTS */
-        measureALL();
+      measureALL();
       Thermo_targetVpwm=Vrefpwm_thermo( Tempe, targetVoltage);
             
 /* Feedback: DUTY keiciu tik kas 100 matavimu, nes naudoju Vref AVG reiksme, kuri kinta tik cia if*/
-      DUTY_5V = PI_con_5V(Vdd5V, Vdd5V_target, 10,10);
+      DUTY_5V = (uint16_t)PI_con_5V(Vdd5V, Vdd5V_target, 10,10);
       ChangePWM_5V_duty(DUTY_5V);
-      DUTY=PI_controller(VrefMv,Thermo_targetVpwm,5,10);   //30,0.2   0.6,0.1    10,20
+      DUTY=(uint16_t)PI_controller(VrefMv,Thermo_targetVpwm,5,10);   //30,0.2   0.6,0.1    10,20
       ChangePWM_duty( PWM_PERIOD - DUTY );
             
 /* Transmit */
-      if (flag_send==1){
+  /*    if (flag_send==1){
         
         RxBuffer[0]=AVG_VrefMv;
         RxBuffer[1]=AVG_VsensorMv;
@@ -222,19 +229,78 @@ int main(void)
         RxBuffer[5]=External_Vref;
         RxBuffer[6]=Thermo_targetVpwm;
         Post_office( RxBuffer);
-
         flag_send=0;
-      }
-      Delay(2); //_____________________________________DEMESIO
-    }
-  }
-}
+      }*/
+  //-----------------------------------   LIN pradzia   ----------------------------------------------------------
+      LIN_TX_buffer[0]=(uint8_t)AVG_VrefMv;
+      LIN_TX_buffer[1]=(uint8_t)AVG_VsensorMv;
+      LIN_TX_buffer[2]=DUTY;
+      LIN_TX_buffer[3]=(uint8_t)Tempe+100;
+      LIN_TX_buffer[4]=(uint8_t)step_mv*1000;
+      LIN_TX_buffer[5]=(uint8_t)External_Vref;
+      LIN_TX_buffer[6]=(uint8_t)Thermo_targetVpwm;
+      LIN_TX_buffer[7]=0;
+        
+      if(LIN_header_received){ // slave received new command from master -> respond to message
+          LIN_header_received = 0; // clear flag
+          Parse_value_switch = 0; // clear value
+          switch(LIN_identifier){
+// Device will be publisher:
+                case(SENSOR_INFO): // send sensor info
+                          //sukrauti i masyva ir ...                                        
+                          LIN_start_transmission(LIN_TX_buffer, 8);
+                    break;
+                case(SENSOR_transmitt_OFFSET): //sensor send current offset values
+                          //sukrauti i masyva ir ...
+                          LIN_start_transmission(LIN_TX_buffer, 8);
+                    break;
+                case(SENSOR_transmitt_SENSITIVITY): //sensor send current sensitivity values
+                          //sukrauti i masyva ir ...
+                          LIN_start_transmission(LIN_TX_buffer, 8);
+                    break;
+// Device will be subscriber:
+                case(SENSOR_receive_OFFSET):  // sensor is receiving offset control value
+                          LIN_slave_is_subscriber	= 1;
+                          Parse_value_switch = SENSOR_receive_OFFSET;
+                    break;
+                case(SENSOR_receive_SENSITIVITY): // sensor is receiving sensitivity control value
+                          LIN_slave_is_subscriber	= 1;
+                          Parse_value_switch = SENSOR_receive_SENSITIVITY;
+                    break;
+
+// Device received command which is not valid
+                  default:
+                    break;
+              }
+            }
+
+// LIN slave  is subscriber:
+        if(LIN_response_received){
+            LIN_response_received=0;
+            switch(Parse_value_switch){
+                case(SENSOR_receive_OFFSET):
+// galima is LIN_RX_received_buffer[] pasiimti duomenis. 8 baitai [0 iki 7]. 8 yra checksum
+//	            for(uint8_t i=0; i<9; i++)
+//		debug_masyvas[i] = LIN_RX_received_buffer[i];
+                  break;
+                case(SENSOR_receive_SENSITIVITY):
+                          // galima is LIN_RX_received_buffer[] pasiimti duomenis
+                  break;
+                  
+                default: //error occured
+                  break;
+                }
+                memset(LIN_RX_received_buffer, 0, 9); // clear buffer
+        }
+//------------------------------------------------------------------------------------------- LIN pabaiga  
+    }//end of while loop
+  }//end of else
+}// end of main
 
 float PI_controller(float value, float target, float Kp, float Ki)
 { 
   float output=0;
   float error=0;
-  float skirtumas=0;
 
   error=target-value;
   if ( ((DUTY<PWM_PERIOD) && (DUTY>0)) && (Ki!=0) ){
@@ -258,7 +324,6 @@ float PI_con_Vsensor(float value, float target, float Kp, float Ki)
   
   float output=0;
   float error=0;
-  float skirtumas=0;
 
   error=target-value;
   if ( ((DUTY<PWM_PERIOD) && (DUTY>0)) && (Ki!=0) ){
@@ -287,7 +352,6 @@ float PI_con_5V(float value, float target, float Kp, float Ki)
 { 
   float output=0;
   float error=0;
-  float skirtumas=0;
   
   error=target-value;
   if ( ((DUTY_5V<PWM_PERIOD_5V) && (DUTY_5V>0)) && (Ki!=0) ){
@@ -309,9 +373,7 @@ float PI_con_5V(float value, float target, float Kp, float Ki)
 uint16_t histereze_5V(float value, uint16_t current_PWM)
 { 
   uint16_t output=0;
-  float error=0;
-  float skirtumas=0;
-
+  
   if (value> 5000.05){
     output=current_PWM-8;
   }
@@ -323,8 +385,6 @@ uint16_t histereze_5V(float value, uint16_t current_PWM)
   
   if( output > PWM_PERIOD_5V )
       output = PWM_PERIOD_5V;
-  if( output < 0 )
-       output = 0;
   
   return output; 
 }
@@ -359,7 +419,7 @@ uint8_t offset_calib (void){
          // valdiklis su target 100mV, o matuojama itampa yra AVG_Vsensor
         for( i=1;i<7000;i++){                           //___________________3000 apie 10sekundziu
          measureALL();
-         DUTY=PI_con_Vsensor(VsensorMv, 100, 0.5, 1.5); // target 50mV  0.2 1
+         DUTY=(uint16_t)PI_con_Vsensor(VsensorMv, 100, 0.5, 1.5); // target 50mV  0.2 1
          ChangePWM_duty( PWM_PERIOD - DUTY );
          Delay(2);
          Post_office( RxBuffer);
@@ -389,7 +449,7 @@ uint8_t offset_calib (void){
       case 4 ://algoritmas kai offset teigiamas
          for( i=1;i<7000;i++){               //_________________________pamazinti laika
           measureALL();
-          DUTY=PI_con_Vsensor(VsensorMv, 3100, 0.2, 1); // target 3.18V  0.2 1
+          DUTY=(uint16_t)PI_con_Vsensor(VsensorMv, 3100, 0.2, 1); // target 3.18V  0.2 1
           ChangePWM_duty( PWM_PERIOD - DUTY ); 
           Delay(2);
           Post_office( RxBuffer);
@@ -609,7 +669,97 @@ float Get_8of10AVG(float buffer[] )
 
   return average; 
 }
+//=========================================================================================================================================================
+/**
+  * @brief  Sends array through LIN bus. Function have to wait till all bytes are send
+  * @param  *buffer - pointer to array, length - data length 1...8 byte
+  */
+void LIN_send_data (uint8_t *buffer, uint8_t length)
+{
+	buffer[length] = LIN_checksum_enhanced(LIN_protected_identifier, buffer, length); //last byte in array must be checksum
 
+	USART_Send_data(buffer, length+1);
+}
+/**
+  * @brief  Sends array through LIN bus using USARTx interrupt. Transmission is  in background, no waiting
+  * @param  *buffer - pointer to array, length - data length 1...8 byte
+  */
+void LIN_start_transmission(uint8_t *buffer, uint8_t length)
+{
+	uint8_t i=0;
+	LIN_tx_total = length+1; // 8 bytes and checksum
+	LIN_transmission_active = 1;
+	for(i=0; i<length; i++)
+		LIN_TX_buffer[i] = buffer[i]; // put values in transmitt buffer.
+	LIN_TX_buffer[length] = LIN_checksum_enhanced(LIN_protected_identifier, buffer, length); //last byte in array must be checksum
+
+	USART_ITConfig(LIN_USART, USART_IT_TXE, ENABLE);	//start transmitt, end of transmission is in interrupt handler;
+}
+// LIN spec 2.x use enhanced checksum. Frame ID is used.
+uint8_t LIN_checksum_enhanced(uint8_t prot_ID, uint8_t *buffer, uint8_t length)
+{
+		uint8_t cheksum = 0;
+		uint16_t temp = 0;
+		uint8_t i=0;
+
+		temp = prot_ID;
+		for(i=0; i<length; i=i+2){
+			temp += buffer[i] + buffer[i+1]; //add carry
+			if(temp > 255) // if owerflow, subtract 0xFF
+				temp = temp - 255;
+		}
+		cheksum = 0xFF ^ temp; // invert
+
+		return cheksum;
+}
+// LIN spec 1.3 use classic checksum. Frame ID is not used, only data bytes.
+uint8_t LIN_checksum_classic(uint8_t prot_ID, uint8_t *buffer, uint8_t length)
+{
+		uint8_t cheksum = 0;
+		uint16_t temp = 0;
+		uint8_t i=0;
+
+		for(i=0; i<length; i=i+2){
+			temp += buffer[i] + buffer[i+1]; //add carry
+			if(temp > 255) // if owerflow, subtract 0xFF
+				temp = temp - 255;
+		}
+		cheksum = 0xFF ^ temp; // invert
+
+		return cheksum;
+}
+/**
+  * @brief  Clears flags after getting response to header
+  * @param  length of received data bytes
+  * @return 0 if response not valid, 1 if success.
+  */
+uint8_t LIN_validate_response(uint8_t data_length)
+{
+	uint8_t calc_checksum = 0;
+
+	 LIN_rx_cnt = 0;
+	 LIN_slave_is_subscriber = 0;
+	 calc_checksum =  LIN_checksum_enhanced(LIN_protected_identifier, LIN_RX_received_buffer,data_length);
+	 if(LIN_RX_received_buffer[data_length] == calc_checksum) // check if data is valid. last byte in array is checksum.
+		 return 1;
+	 else
+		 return 0;
+}
+/**
+  * @brief  Sends array through USART TX pin.
+  * @param  *buffer - pointer to array, length - data length
+  */
+void USART_Send_data(uint8_t *buffer, uint32_t length)
+{
+		while(length--)
+		{
+			while (USART_GetFlagStatus(LIN_USART,USART_FLAG_TXE) == RESET)
+			{}
+			 USART_SendData(LIN_USART, *buffer);
+			 buffer++;
+		}
+}
+//====================================================================================================================
 /**
   * @brief  Configure SDADC1 channel 4P in Single Ended Zero Reference mode using
   *         injected conversion with continuous mode enabled.
@@ -622,7 +772,6 @@ static uint32_t SDADC1_Config(void)
 {
   SDADC_AINStructTypeDef SDADC_AINStructure;
   GPIO_InitTypeDef GPIO_InitStructure;
-  NVIC_InitTypeDef NVIC_InitStructure;
   uint32_t SDADCTimeout = 0;
 
   /* SDADC1 APB2 interface clock enable */
@@ -708,13 +857,6 @@ static uint32_t SDADC1_Config(void)
 
   /* Exit initialization mode */
   SDADC_InitModeCmd(SDADC1, DISABLE);
-
-  /* NVIC Configuration */
- /* NVIC_InitStructure.NVIC_IRQChannel = SDADC1_IRQn;
-  NVIC_InitStructure.NVIC_IRQChannelPreemptionPriority = 0;
-  NVIC_InitStructure.NVIC_IRQChannelSubPriority = 0;
-  NVIC_InitStructure.NVIC_IRQChannelCmd = ENABLE;
-  NVIC_Init(&NVIC_InitStructure);*/
 
   /* configure calibration to be performed on conf0 */
   SDADC_CalibrationSequenceConfig(SDADC1, SDADC_CalibrationSequence_1);
@@ -877,9 +1019,11 @@ static uint32_t SDADC3_Config(void)
 
 void USART2_Configuration(void)
 {
-    RCC_APB1PeriphClockCmd(RCC_APB1Periph_USART2, ENABLE);
-    RCC_AHBPeriphClockCmd(RCC_AHBPeriph_GPIOA, ENABLE);
-
+  USART_InitTypeDef	USART_InitStructure;
+  NVIC_InitTypeDef      NVIC_InitStructure;
+  
+  RCC_APB1PeriphClockCmd(RCC_APB1Periph_USART2, ENABLE);
+  RCC_AHBPeriphClockCmd(RCC_AHBPeriph_GPIOA, ENABLE);
 
   /* Configure USART1 RX and Tx*/
   GPIO_InitStructure.GPIO_Pin = GPIO_Pin_2 | GPIO_Pin_3; 
@@ -890,32 +1034,40 @@ void USART2_Configuration(void)
   GPIO_PinAFConfig(GPIOA, GPIO_PinSource2, GPIO_AF_7);
   GPIO_PinAFConfig(GPIOA, GPIO_PinSource3, GPIO_AF_7);
 
-  /* Configure USART1 */
-  USART_InitStructure.USART_BaudRate = 115200; // Baud rate. Bits (or characters) per second.
-  USART_InitStructure.USART_WordLength = USART_WordLength_8b; // Word lenght = 8 bits
-  USART_InitStructure.USART_StopBits = USART_StopBits_1; // Use one stop bit
-  USART_InitStructure.USART_Parity = USART_Parity_No ; // No parity
-  USART_InitStructure.USART_Mode = USART_Mode_Rx | USART_Mode_Tx; // Receive and transmit enabletd
-  USART_InitStructure.USART_HardwareFlowControl = USART_HardwareFlowControl_None; // Hardware flow control disabled (RTS and CTS signals)
-  USART_Init(USART2, &USART_InitStructure);
-  
-  USART_Cmd(USART2, ENABLE); // Enable USART1 parameters
-  
-  USART_ITConfig(USART2, USART_IT_RXNE, ENABLE); // Enable Rx interrupt
- 
-  //NVIC_EnableIRQ(USART1_IRQn); // Enable USART1 global interrupt
-  
-  /* NVIC structure for USART1 interrupt */
-  /*NVIC_InitStructure.NVIC_IRQChannel = USART1_IRQn;
-  NVIC_InitStructure.NVIC_IRQChannelPreemptionPriority = 0;
+  USART_InitStructure.USART_BaudRate = 19200;
+  USART_InitStructure.USART_WordLength = USART_WordLength_8b ;
+  USART_InitStructure.USART_StopBits = USART_StopBits_1;
+  USART_InitStructure.USART_Parity = USART_Parity_No;
+  USART_InitStructure.USART_HardwareFlowControl = USART_HardwareFlowControl_None;
+  USART_InitStructure.USART_Mode = USART_Mode_Rx | USART_Mode_Tx;
+
+  USART_Init(LIN_USART, &USART_InitStructure);
+
+  /* NVIC configuration */
+  /* Configure the Priority Group to 2 bits */
+  NVIC_PriorityGroupConfig(NVIC_PriorityGroup_2);
+
+  /* Enable the USARTx Interrupt */
+  NVIC_InitStructure.NVIC_IRQChannel = LIN_USART_IRQ ;
+  NVIC_InitStructure.NVIC_IRQChannelPreemptionPriority = 1;
+  NVIC_InitStructure.NVIC_IRQChannelSubPriority = 0;
   NVIC_InitStructure.NVIC_IRQChannelCmd = ENABLE;
-  NVIC_Init(&NVIC_InitStructure);*/
+  NVIC_Init(&NVIC_InitStructure);
+
+  USART_ITConfig(LIN_USART, USART_IT_RXNE, ENABLE);
+  USART_ITConfig(LIN_USART, USART_IT_TXE, DISABLE);
+  USART_ITConfig(LIN_USART, USART_IT_ORE , ENABLE);
+  USART_ITConfig(LIN_USART, USART_IT_LBD, ENABLE);
+
+  USART_LINBreakDetectLengthConfig(LIN_USART, USART_LINBreakDetectLength_11b);
+  USART_LINCmd(LIN_USART, ENABLE);
+  /* Enable/disable the USART */
+  USART_Cmd(LIN_USART, ENABLE);
 }
 
 void ADC_init( )
 { 
- 
-  /* ADCCLK = PCLK2/4 */
+   /* ADCCLK = PCLK2/4 */
   RCC_ADCCLKConfig(RCC_PCLK2_Div4); 
   
   /* DMA1 clock enable */
@@ -1076,11 +1228,11 @@ void InitializePWMChannel()
 
 float sensor_init(void)
 {
-uint32_t *temp;
-int8_t offset_pol;
-float output;
+  uint32_t *temp;
+  int8_t offset_pol;
+  float output;
 
-     //nuskaitymas is flash 
+   //nuskaitymas is flash 
   temp = (uint32_t*)variable_ADRESS;
   output = *(float *)temp;
   temp = (uint32_t*)(variable_ADRESS+4);
@@ -1105,13 +1257,6 @@ void ChangePWM_5V_duty( uint16_t PULSE )
 TIM2->CCR1=PULSE;
 }
 
-void RS485(uint8_t direction){
-  if(direction == TRANSMIT){
-    GPIO_SetBits(GPIOA, GPIO_Pin_4);
-  }else if(direction == RECEIVE){
-    GPIO_ResetBits(GPIOA, GPIO_Pin_4);
-  }
-}
 
 /**
   * @brief  Inserts a delay time.
