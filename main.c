@@ -2,8 +2,8 @@
   ******************************************************************************
   * @file    SDADC/SDADC_Voltmeter/main.c 
   * @author  Donatas
-  * @version V1.13.3
-  * @date    05-February-2018
+  * @version V1.13.4
+  * @date    09-February-2018
   * @brief   Main program body
   * Rx - PA2  TX - PA3, UART2 
   * SDADC PB2 
@@ -440,7 +440,7 @@ void measureALL(void)
       
       //5 Vdd matavimas
       //      Vdd5V =    ((InjectedConvData3Ch7 + 32768) * step_mv)/0.6175; //su Gwinstek matuojant 0.6175 atitnka 5V, kai varzos 2.4K ir 3.9K: Multiplexer
-      Vdd5V =    ((InjectedConvData3Ch7 + 32768) * step_mv)/0.614308; //su Gwinstek matuojant  atitnka 5V, kai varzos 2.4K ir 3.9K : INA188
+      Vdd5V =    ((InjectedConvData3Ch7 + 32768) * step_mv)/0.61458; //su Gwinstek matuojant  atitnka 5V, kai varzos 2.4K ir 3.9K : INA188
       Vdd5V_AVG = Vdd5V_AVG + (Vdd5V - Vdd5V_AVG)/200;
       
 /* vidurkinimas Vsensor*/
@@ -551,7 +551,8 @@ float temperature(float ADC_vdd, float ADC_temperature){ //_____________________
 
 float thermo_Vref(float temperatura_degree){ //______________________Pataisyti
     float result;
-      result = -0.0025*temperatura_degree+3000.45;
+    result = -0.0025*temperatura_degree+3006;
+//      result = -0.0025*temperatura_degree+3000.45;
 //    result = -0.012*temperatura_degree+3000.45; 
 //    result = -0.0054*temperatura_degree+3000.45;   
 //    result = temperatura_degree *0.067+2484.4;   
