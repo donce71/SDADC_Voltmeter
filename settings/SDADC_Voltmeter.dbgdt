@@ -987,7 +987,7 @@
                     <item>step_mv</item>
                     <item>flag_calibruoti</item>
                     <item>calibravimo_rezult</item>
-                    <item></item>
+                    <item />
                 </expressions>
                 <col-names>
                     <item>Expression</item>

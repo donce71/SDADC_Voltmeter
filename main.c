@@ -2,8 +2,8 @@
   ******************************************************************************
   * @file    SDADC/SDADC_Voltmeter/main.c 
   * @author  Donatas
-  * @version V1.23.4
-  * @date    06-February-2018
+  * @version V1.23.5
+  * @date    12-February-2018
   * @brief   Main program body
   * Rx - PA2  TX - PA3, UART2 
   * SDADC PB2 
@@ -30,6 +30,7 @@
   * 2018-02-04 Pradedu rasyti koda plokstei su INA188 stiprintuvais
   * 2018-02-04 Naujas Post Office
   * 2018-02-08 PWMref target kompensacija (Vref) ir LIN
+  * 2018-02-12 Newton perskaiciavimo funkcijos
  ******************************************************************************
   */
 
@@ -76,7 +77,8 @@ float AVG_VDD_ref_NEW=3300;
 float Voltage_buffer[10] = {0};
 float Voltage_buffer2[10] = {0};
 float Voltage_of_10=0;
-float ADC_Vtemp=0; float ADC_Vref=0;
+float ADC_Vtemp=0; 
+float ADC_Vref=0;
 float new_temp=0;
 float External_Vref=0;
 float step_mv_new=0;
@@ -86,6 +88,7 @@ float Vdd5V_AVG= 5000;
 float V_3v3_calculated=0;
 float AVG_V_3v3_calculated=3300;
 float Thermo_targetVpwm=0;
+float Newton=0;
 
 /* Vidurkinimo variables */
 uint16_t sumavimo_index1=0; 
@@ -106,6 +109,12 @@ float AVG_error=0;
 int8_t flag_send=0;
 float Vdd5V_target=5000;
 
+/*Flash memory vairables*/
+uint32_t *temp;
+int8_t offset_poliarumas;
+float Newton_keof;
+float zeroForce_mV;
+
 /* Pagalbiniai variables */
 uint32_t kintamasis=0;
 float P_tu=2;
@@ -113,6 +122,7 @@ float I_tu=0;
 uint8_t flag_calibruoti=0;
 float RxBuffer[11]={0xFFF,0xFFF,0xFFF,0xFFF,0xFFF,0xFFF,0xFFF,0xFFF,0xFFF,0xFFF,0xFFF};
 uint8_t calibravimo_rezult=0;
+uint8_t flag_tare=0;
 
 /* Private variables  for LIN commmunication*/
 bool  LIN_frame_started = 0; // flag, frame starts after reak and sync byte.
@@ -141,6 +151,10 @@ uint8_t offset_calib( void );
 float PI_con_Vsensor(float value, float target, float Kp, float Ki);
 void measureALL(void);
 float sensor_init(void);
+float get_Newton(int8_t offset_pol, float sensor_mV, float zeroForce_mV, float Newton_keof);
+void SetCoeffValueToFlash(float receivedA);
+float SetTARE_and_set_Flash(void);
+
 
 /* Periptheral function prototypes -------------------------------------------*/
 static uint32_t SDADC1_Config(void);
@@ -159,12 +173,6 @@ int main(void)
 {
   RCC_ClocksTypeDef RCC_Clocks;
 
-  /*!< At this stage the microcontroller clock setting is already configured, 
-       this is done through SystemInit() function which is called from startup
-       file (startup_stm32f37x.s) before to branch to application main.
-       To reconfigure the default setting of SystemInit() function, refer to
-       system_stm32f37x.c file
-     */
   /* SysTick end of count event each 1ms */
   RCC_GetClocksFreq(&RCC_Clocks);
   SysTick_Config(RCC_Clocks.HCLK_Frequency / 1000);
@@ -183,7 +191,14 @@ int main(void)
   targetVoltage = sensor_init();
   //targetVoltage=3168; //________________________________________________________ISTRINTI
 
-
+   //nuskaitymas is flash 
+  temp = (uint32_t*)(variable_ADRESS+4);
+  offset_poliarumas = *(int8_t *)temp; 
+  temp = (uint32_t*)(COEFF_ADRESS);
+  Newton_keof = *(float *)temp; 
+  temp = (uint32_t*)(Tare_ADRESS);
+  zeroForce_mV = *(float *)temp; 
+  
   /* Test DMA1 TC flag */
   while((DMA_GetFlagStatus(DMA1_FLAG_TC1)) == RESET ); 
   /* Clear DMA TC flag */
@@ -207,6 +222,10 @@ int main(void)
         targetVoltage = sensor_init();
         flag_calibruoti=0;
       }
+      if (flag_tare==1){
+        zeroForce_mV=SetTARE_and_set_Flash();
+        flag_tare=0;
+      }
 
 /* ALL ADC AND SDADC MEASUREMENTS */
       measureALL();
@@ -217,20 +236,10 @@ int main(void)
       ChangePWM_5V_duty(DUTY_5V);
       DUTY=(uint16_t)PI_controller(VrefMv,Thermo_targetVpwm,5,10);   //30,0.2   0.6,0.1    10,20
       ChangePWM_duty( PWM_PERIOD - DUTY );
-            
-/* Transmit */
-  /*    if (flag_send==1){
-        
-        RxBuffer[0]=AVG_VrefMv;
-        RxBuffer[1]=AVG_VsensorMv;
-        RxBuffer[2]=DUTY;
-        RxBuffer[3]=Tempe+100;
-        RxBuffer[4]=step_mv*1000;
-        RxBuffer[5]=External_Vref;
-        RxBuffer[6]=Thermo_targetVpwm;
-        Post_office( RxBuffer);
-        flag_send=0;
-      }*/
+
+/* Convert to Newton */      
+      Newton = get_Newton( offset_poliarumas, AVG_VsensorMv,  zeroForce_mV,  Newton_keof);
+
   //-----------------------------------   LIN pradzia   ----------------------------------------------------------
       LIN_TX_buffer[0]=(uint8_t)AVG_VrefMv;
       LIN_TX_buffer[1]=(uint8_t)AVG_VsensorMv;
@@ -297,6 +306,25 @@ int main(void)
   }//end of else
 }// end of main
 
+float get_Newton(int8_t offset_pol, float sensor_mV, float zeroForce_mV, float Newton_keof)
+{ 
+  float Newton=0;
+  float skirtumas_mV=0;
+  
+  switch (offset_pol){
+    case 1: //spaudziant itampa dideja
+      skirtumas_mV=sensor_mV-zeroForce_mV;
+      break;
+  case 2://spaudiant itampa mazeja
+      skirtumas_mV=zeroForce_mV-sensor_mV;
+    break;
+      }
+  
+  Newton = skirtumas_mV*Newton_keof; 
+  
+  return Newton; 
+}
+
 float PI_controller(float value, float target, float Kp, float Ki)
 { 
   float output=0;
@@ -304,7 +332,7 @@ float PI_controller(float value, float target, float Kp, float Ki)
 
   error=target-value;
   if ( ((DUTY<PWM_PERIOD) && (DUTY>0)) && (Ki!=0) ){
-    integral = integral + (error)/10;}       //reikia padauginti is iteration period______DEMESIO!!!!!!!!!!!!!!!!
+    integral = integral + (error)/10;}       
   output= (Kp*error+Ki*integral);
   
       //apsauga nuo integral suoliu, RIBAS reikia parinkti pagal matavimo diapazona
@@ -327,7 +355,7 @@ float PI_con_Vsensor(float value, float target, float Kp, float Ki)
 
   error=target-value;
   if ( ((DUTY<PWM_PERIOD) && (DUTY>0)) && (Ki!=0) ){
-    integral3 = integral3 + (error)/10;}       //reikia padauginti is iteration period______DEMESIO!!!!!!!!!!!!!!!!
+    integral3 = integral3 + (error)/10;}       
   output= (Kp*error+Ki*integral3);
   
       //apsauga nuo integral suoliu, RIBAS reikia parinkti pagal matavimo diapazona
@@ -339,12 +367,12 @@ float PI_con_Vsensor(float value, float target, float Kp, float Ki)
   if( output < 0 )
        output = 0;
   
-        RxBuffer[0]=AVG_VrefMv;
+ /*       RxBuffer[0]=AVG_VrefMv;
         RxBuffer[1]=AVG_VsensorMv;
         RxBuffer[2]=DUTY;
         RxBuffer[3]=integral3;
         RxBuffer[4]=error;        
-  
+*/  
   return output; 
 }
 
@@ -370,7 +398,7 @@ float PI_con_5V(float value, float target, float Kp, float Ki)
   return output; 
 }
 
-uint16_t histereze_5V(float value, uint16_t current_PWM)
+uint16_t histereze_5V(float value, uint16_t current_PWM) //pradinis variantas, dabar nenaudojama
 { 
   uint16_t output=0;
   
@@ -419,12 +447,12 @@ uint8_t offset_calib (void){
          // valdiklis su target 100mV, o matuojama itampa yra AVG_Vsensor
         for( i=1;i<7000;i++){                           //___________________3000 apie 10sekundziu
          measureALL();
-         DUTY=(uint16_t)PI_con_Vsensor(VsensorMv, 100, 0.5, 1.5); // target 50mV  0.2 1
+         DUTY=(uint16_t)PI_con_Vsensor(VsensorMv, Vs_offsetPOL1, 0.5, 1.5); // target 50mV  0.2 1
          ChangePWM_duty( PWM_PERIOD - DUTY );
          Delay(2);
-         Post_office( RxBuffer);
+         //Post_office( RxBuffer);
         }
-        if (AVG_VsensorMv>98 && AVG_VsensorMv<102){
+        if ( (AVG_VsensorMv>(Vs_offsetPOL1-2)) && (Vs_offsetPOL1<(100+2))  ){
           output=1; // gerai sukalibruota neigiamas offset
           refPWM_target= AVG_VrefMv;
           offset_poliarumas=1;
@@ -449,12 +477,12 @@ uint8_t offset_calib (void){
       case 4 ://algoritmas kai offset teigiamas
          for( i=1;i<7000;i++){               //_________________________pamazinti laika
           measureALL();
-          DUTY=(uint16_t)PI_con_Vsensor(VsensorMv, 3100, 0.2, 1); // target 3.18V  0.2 1
+          DUTY=(uint16_t)PI_con_Vsensor(VsensorMv, Vs_offsetPOL2, 0.2, 1); // target 3.18V  0.2 1
           ChangePWM_duty( PWM_PERIOD - DUTY ); 
           Delay(2);
-          Post_office( RxBuffer);
+          //Post_office( RxBuffer);
           }
-         if (AVG_VsensorMv>3100-2 && AVG_VsensorMv<3100+2){
+         if (AVG_VsensorMv>(Vs_offsetPOL2-2) && AVG_VsensorMv<(Vs_offsetPOL2+2) ){
           output=4; // gerai sukalibruotas teigiamas offset
           refPWM_target= AVG_VrefMv;
           offset_poliarumas=2;
@@ -1236,7 +1264,8 @@ float sensor_init(void)
   temp = (uint32_t*)variable_ADRESS;
   output = *(float *)temp;
   temp = (uint32_t*)(variable_ADRESS+4);
-  offset_pol = *(int8_t *)temp; // 1 - neigiamas offset, 2 - teigiamas offset
+  offset_pol = *(int8_t *)temp; // 1 - neigiamas offset, spaudziant dideja
+                                // 2 - teigiamas offset, spaudziant mazeja
 
   if (offset_pol==1){
     GPIO_ResetBits(GPIOB, GPIO_Pin_4); // spaudziant dideja itampa: Multiplexer
@@ -1245,6 +1274,40 @@ float sensor_init(void)
     GPIO_SetBits(GPIOB, GPIO_Pin_4);   // spaudziant mazeja itampa: Multiplexer 
   }
    return output;
+}
+
+float SetTARE_and_set_Flash(){
+  float tare_value=0;
+  uint16_t i=0;
+
+   for( i=1;i<1000;i++){            //___________________3000 apie 10sekundziu
+      Delay(1); 
+/* ALL ADC AND SDADC MEASUREMENTS */
+      measureALL();
+      Thermo_targetVpwm=Vrefpwm_thermo( Tempe, targetVoltage);
+/* Feedback: DUTY keiciu tik kas 100 matavimu, nes naudoju Vref AVG reiksme, kuri kinta tik cia if*/
+      DUTY_5V = (uint16_t)PI_con_5V(Vdd5V, Vdd5V_target, 10,10);
+      ChangePWM_5V_duty(DUTY_5V);
+      DUTY=(uint16_t)PI_controller(VrefMv,Thermo_targetVpwm,5,10);   //30,0.2   0.6,0.1    10,20
+      ChangePWM_duty( PWM_PERIOD - DUTY );
+   }
+   
+   tare_value=AVG_VsensorMv;
+  
+  FLASH_Unlock();
+  FLASH_ErasePage(Tare_ADRESS);
+  FLASH_ProgramWord(Tare_ADRESS, *(uint32_t *)&tare_value);
+  FLASH_Lock();
+  
+  return tare_value;
+}
+
+void SetCoeffValueToFlash(float receivedA){
+  
+  FLASH_Unlock();
+  FLASH_ErasePage(COEFF_ADRESS);
+  FLASH_ProgramWord(COEFF_ADRESS, *(uint32_t *)&receivedA);
+  FLASH_Lock();
 }
 
 void ChangePWM_duty( uint16_t PULSE )

@@ -43,9 +43,9 @@
 /* Private define ------------------------------------------------------------*/
 /* Private macro -------------------------------------------------------------*/
 /* Private variables ---------------------------------------------------------*/
-extern int16_t InjectedConvDataCh4;
+/*extern int16_t InjectedConvDataCh4;
 extern int16_t InjectedConvDataCh8;
-extern int16_t InjectedConvDataCh7;
+extern int16_t InjectedConvDataCh7;*/
 extern int16_t InjectedConvData3Ch7;
 extern int16_t ping_pong = 0;
 
@@ -170,7 +170,7 @@ void SysTick_Handler(void)
   */
 void SDADC1_IRQHandler(void)
 {
-  uint32_t ChannelIndex;
+  /*uint32_t ChannelIndex;
   
   if(SDADC_GetFlagStatus(SDADC1, SDADC_FLAG_JEOC) != RESET)
   {
@@ -187,7 +187,7 @@ void SDADC1_IRQHandler(void)
     InjectedConvDataCh8=SDADC_GetInjectedConversionValue(SDADC1, &ChannelIndex);
     ping_pong=0;
     }
-  } 
+  } */
 }
 
 /**
