@@ -64,12 +64,14 @@
 #define TRANSMIT                0
 #define N_DECIMAL_POINTS_PRECISION (1000) // n = 3. Three decimal points.
 
-#define VREF_INTERNAL_BASE_ADDRESS 0x1FFFF7BA
+#define VREF_INTERNAL_BASE_ADDRESS  0x1FFFF7BA
 #define ADC1_DR_Address             0x4001244C
 #define SDADC1_DR_Address           0x40016060
-#define variable_ADRESS             0x08004000
-#define COEFF_ADRESS                0x08004000+8
-#define Tare_ADRESS                 0x08004000+12
+#define Vref_ADRESS                 0x08004000
+#define pol_ADRESS                  0x08004000+4
+#define Tare_ADRESS                 0x08004000+8
+#define COEFF_ADRESS                0x08004000+12
+
 
 #define Vs_offsetPOL1          (float) 100 //Vsensor offset itampa kai POLiarumas 1 neigiamas, spaudziant dideja itampa
 #define Vs_offsetPOL2          (float) 3100//Vsensor offset itampa kai POLiarumas 2 teigiamas, spaudziant mazeja itampa

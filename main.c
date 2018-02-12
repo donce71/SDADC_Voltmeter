@@ -2,7 +2,7 @@
   ******************************************************************************
   * @file    SDADC/SDADC_Voltmeter/main.c 
   * @author  Donatas
-  * @version V1.23.5
+  * @version V1.23.6
   * @date    12-February-2018
   * @brief   Main program body
   * Rx - PA2  TX - PA3, UART2 
@@ -30,7 +30,7 @@
   * 2018-02-04 Pradedu rasyti koda plokstei su INA188 stiprintuvais
   * 2018-02-04 Naujas Post Office
   * 2018-02-08 PWMref target kompensacija (Vref) ir LIN
-  * 2018-02-12 Newton perskaiciavimo funkcijos
+  * 2018-02-12 Newton perskaiciavimo funkcijos ir Flash irasymas koeficientu
  ******************************************************************************
   */
 
@@ -112,7 +112,7 @@ float Vdd5V_target=5000;
 /*Flash memory vairables*/
 uint32_t *temp;
 int8_t offset_poliarumas;
-float Newton_keof;
+float Newton_koef;
 float zeroForce_mV;
 
 /* Pagalbiniai variables */
@@ -123,6 +123,9 @@ uint8_t flag_calibruoti=0;
 float RxBuffer[11]={0xFFF,0xFFF,0xFFF,0xFFF,0xFFF,0xFFF,0xFFF,0xFFF,0xFFF,0xFFF,0xFFF};
 uint8_t calibravimo_rezult=0;
 uint8_t flag_tare=0;
+uint8_t flag_koef=0;
+float naujas_Newton_koef=0;
+
 
 /* Private variables  for LIN commmunication*/
 bool  LIN_frame_started = 0; // flag, frame starts after reak and sync byte.
@@ -151,8 +154,8 @@ uint8_t offset_calib( void );
 float PI_con_Vsensor(float value, float target, float Kp, float Ki);
 void measureALL(void);
 float sensor_init(void);
-float get_Newton(int8_t offset_pol, float sensor_mV, float zeroForce_mV, float Newton_keof);
-void SetCoeffValueToFlash(float receivedA);
+float get_Newton(int8_t offset_pol, float sensor_mV, float zeroForce_mV, float keof);
+void WriteValuesFLASH(float val1, uint8_t val2, float val3, float val4);
 float SetTARE_and_set_Flash(void);
 
 
@@ -183,20 +186,18 @@ int main(void)
   InitializePWMChannel();
   ADC_init();
   DMA_initSDADC();
-
  
   vref_internal_calibrated = *((uint16_t *)(VREF_INTERNAL_BASE_ADDRESS)); //ADC reiksme kai Vdd=3.3V
   Vref_internal_itampa= (vref_internal_calibrated)*3300/ 4095; //Vidinio Vref itampa
   Vref_internal_itampa= 1229;                // Kalibruojant su PICOLOG
   targetVoltage = sensor_init();
-  //targetVoltage=3168; //________________________________________________________ISTRINTI
 
    //nuskaitymas is flash 
-  temp = (uint32_t*)(variable_ADRESS+4);
-  offset_poliarumas = *(int8_t *)temp; 
-  temp = (uint32_t*)(COEFF_ADRESS);
-  Newton_keof = *(float *)temp; 
-  temp = (uint32_t*)(Tare_ADRESS);
+    temp = (uint32_t*)(pol_ADRESS);
+  offset_poliarumas = *(uint8_t *)temp; 
+    temp = (uint32_t*)(COEFF_ADRESS);
+  Newton_koef = *(float *)temp; 
+    temp = (uint32_t*)(Tare_ADRESS);
   zeroForce_mV = *(float *)temp; 
   
   /* Test DMA1 TC flag */
@@ -216,16 +217,26 @@ int main(void)
   {    
    while (1)
     {
+      Delay(2);
 /*  KALIBRAVIMAS */      
       if (flag_calibruoti==1){
         calibravimo_rezult=offset_calib();//visi output daugiau nei 50decimal yra klaidos
         targetVoltage = sensor_init();
+        //nuskaitymas is flash 
+        temp = (uint32_t*)(pol_ADRESS);
+        offset_poliarumas = *(uint8_t *)temp; 
         flag_calibruoti=0;
       }
       if (flag_tare==1){
         zeroForce_mV=SetTARE_and_set_Flash();
         flag_tare=0;
       }
+      if (flag_koef==1){
+        WriteValuesFLASH(targetVoltage, offset_poliarumas, zeroForce_mV, naujas_Newton_koef);
+        Newton_koef=naujas_Newton_koef;
+        flag_koef=0;
+      }
+      
 
 /* ALL ADC AND SDADC MEASUREMENTS */
       measureALL();
@@ -238,7 +249,7 @@ int main(void)
       ChangePWM_duty( PWM_PERIOD - DUTY );
 
 /* Convert to Newton */      
-      Newton = get_Newton( offset_poliarumas, AVG_VsensorMv,  zeroForce_mV,  Newton_keof);
+      Newton = get_Newton( offset_poliarumas, AVG_VsensorMv,  zeroForce_mV,  Newton_koef);
 
   //-----------------------------------   LIN pradzia   ----------------------------------------------------------
       LIN_TX_buffer[0]=(uint8_t)AVG_VrefMv;
@@ -320,7 +331,7 @@ float get_Newton(int8_t offset_pol, float sensor_mV, float zeroForce_mV, float N
     break;
       }
   
-  Newton = skirtumas_mV*Newton_keof; 
+  Newton = skirtumas_mV/Newton_keof; 
   
   return Newton; 
 }
@@ -422,7 +433,7 @@ uint8_t offset_calib (void){
   uint8_t output=0;
   uint32_t i=0;
   uint8_t flag_baigta=0;
-  int8_t offset_poliarumas=0;
+  uint8_t Poliarumas=0;
   float refPWM_target;
   
      /* local variable definition */
@@ -437,7 +448,7 @@ uint8_t offset_calib (void){
          ChangePWM_duty( PWM_PERIOD - 0 );  //Vref = 2mV
          Delay(100); //ms
          measureALL();
-         if (VsensorMv<=100)
+         if (((SDADCData_Tab[0] + 32768) * step_mv_new)<=100)
            state=2;  // offset neigiamas
          else 
            state=3; //offset teigiamas
@@ -455,7 +466,7 @@ uint8_t offset_calib (void){
         if ( (AVG_VsensorMv>(Vs_offsetPOL1-2)) && (Vs_offsetPOL1<(100+2))  ){
           output=1; // gerai sukalibruota neigiamas offset
           refPWM_target= AVG_VrefMv;
-          offset_poliarumas=1;
+          Poliarumas=1;
           state=5; }
         else{
           output=98; // nepavyko sukalibruoti neigiamo offset
@@ -467,7 +478,7 @@ uint8_t offset_calib (void){
          ChangePWM_duty( PWM_PERIOD - 50000 );  //Vref = 3300mV
          Delay(100); //ms
          measureALL();
-         if (((SDADCData_Tab[2] + 32768) * step_mv_new)>3180)
+         if (((SDADCData_Tab[0] + 32768) * step_mv_new)>3180)
            state=4;  // offset tikrai  teigiamas
          else {
            output=97; //klaida, ofset neveikia kaip teigiamas
@@ -485,7 +496,7 @@ uint8_t offset_calib (void){
          if (AVG_VsensorMv>(Vs_offsetPOL2-2) && AVG_VsensorMv<(Vs_offsetPOL2+2) ){
           output=4; // gerai sukalibruotas teigiamas offset
           refPWM_target= AVG_VrefMv;
-          offset_poliarumas=2;
+          Poliarumas=2;
           state=5;}
          else {
           output=95; // nepavyko sukalibruoti teigiamo offset  
@@ -493,11 +504,7 @@ uint8_t offset_calib (void){
          break;
          
        case 5 ://irasome i atminti
-           FLASH_Unlock();
-            FLASH_ErasePage(variable_ADRESS);
-            FLASH_ProgramWord(variable_ADRESS, *(uint32_t *)&refPWM_target);
-            FLASH_ProgramWord(variable_ADRESS+4, *(int8_t *)&offset_poliarumas);
-            FLASH_Lock();
+            WriteValuesFLASH(refPWM_target, Poliarumas, zeroForce_mV,  Newton_koef);
             flag_baigta=1;
          break;
 
@@ -1261,9 +1268,9 @@ float sensor_init(void)
   float output;
 
    //nuskaitymas is flash 
-  temp = (uint32_t*)variable_ADRESS;
+  temp = (uint32_t*)Vref_ADRESS;
   output = *(float *)temp;
-  temp = (uint32_t*)(variable_ADRESS+4);
+  temp = (uint32_t*)(pol_ADRESS);
   offset_pol = *(int8_t *)temp; // 1 - neigiamas offset, spaudziant dideja
                                 // 2 - teigiamas offset, spaudziant mazeja
 
@@ -1277,10 +1284,9 @@ float sensor_init(void)
 }
 
 float SetTARE_and_set_Flash(){
-  float tare_value=0;
   uint16_t i=0;
 
-   for( i=1;i<1000;i++){            //___________________3000 apie 10sekundziu
+   for( i=1;i<3000;i++){      
       Delay(1); 
 /* ALL ADC AND SDADC MEASUREMENTS */
       measureALL();
@@ -1291,22 +1297,20 @@ float SetTARE_and_set_Flash(){
       DUTY=(uint16_t)PI_controller(VrefMv,Thermo_targetVpwm,5,10);   //30,0.2   0.6,0.1    10,20
       ChangePWM_duty( PWM_PERIOD - DUTY );
    }
-   
-   tare_value=AVG_VsensorMv;
+  WriteValuesFLASH(targetVoltage, offset_poliarumas, AVG_VsensorMv, Newton_koef);
   
-  FLASH_Unlock();
-  FLASH_ErasePage(Tare_ADRESS);
-  FLASH_ProgramWord(Tare_ADRESS, *(uint32_t *)&tare_value);
-  FLASH_Lock();
-  
-  return tare_value;
+  return AVG_VsensorMv;
 }
 
-void SetCoeffValueToFlash(float receivedA){
+
+void WriteValuesFLASH(float val1, uint8_t val2, float val3, float val4){
   
   FLASH_Unlock();
-  FLASH_ErasePage(COEFF_ADRESS);
-  FLASH_ProgramWord(COEFF_ADRESS, *(uint32_t *)&receivedA);
+  FLASH_ErasePage(Vref_ADRESS);
+  FLASH_ProgramWord(Vref_ADRESS, *(uint32_t *)&val1); // Vref reiksme, kalibravimo metu
+  FLASH_ProgramWord(pol_ADRESS, *(uint8_t *) &val2); // sensoriaus pajungimo poliskumas, 1-spaud, 2 - spaud mazeja
+  FLASH_ProgramWord(Tare_ADRESS, *(uint32_t *)&val3); // Vs taravimo reiksme 
+  FLASH_ProgramWord(COEFF_ADRESS, *(uint32_t *)&val4); // Newton konvertavimo koeficientas
   FLASH_Lock();
 }
 
