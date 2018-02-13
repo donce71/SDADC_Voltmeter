@@ -20,7 +20,7 @@
         <stlinkResetStrategy>1</stlinkResetStrategy>
     </StLinkDriver>
     <DebugChecksum>
-        <Checksum>1370600816</Checksum>
+        <Checksum>2989553067</Checksum>
     </DebugChecksum>
     <Exceptions>
         <StopOnUncaught>_ 0</StopOnUncaught>
@@ -81,7 +81,7 @@
         <LogEnabled>0</LogEnabled>
         <GraphEnabled>0</GraphEnabled>
         <ShowTimeLog>1</ShowTimeLog>
-        <SumEnabled>0</SumEnabled>
+        <SumEnabled>1</SumEnabled>
         <ShowTimeSum>1</ShowTimeSum>
         <SumSortOrder>0</SumSortOrder>
     </InterruptLog>
@@ -129,9 +129,9 @@
     <Breakpoints2>
         <Bp0>_ 0 "EMUL_CODE" "{$PROJ_DIR$\..\main_V2_UART_SDADC.c}.0.1" 0 0 1 "" 0 "" 0</Bp0>
         <Bp1>_ 0 "EMUL_DATA" "while" 0 0 0 0 4294967295</Bp1>
-        <Bp2>_ 1 "EMUL_CODE" "{$PROJ_DIR$\main.c}.466.9" 0 0 1 "" 0 "" 0</Bp2>
-        <Bp3>_ 1 "EMUL_CODE" "{$PROJ_DIR$\main.c}.499.11" 0 0 1 "" 0 "" 0</Bp3>
-        <Bp4>_ 1 "EMUL_CODE" "{$PROJ_DIR$\main.c}.502.11" 0 0 1 "" 0 "" 0</Bp4>
+        <Bp2>_ 0 "EMUL_DATA_LOG" "Newton" 0 0</Bp2>
+        <Bp3>_ 0 "EMUL_DATA_LOG" "Newton" 0 0</Bp3>
+        <Bp4>_ 0 "EMUL_DATA_LOG" "Newton" 0 0</Bp4>
         <Count>5</Count>
     </Breakpoints2>
     <Aliases>

@@ -82,11 +82,13 @@
 #define TRUE  1
 #define FALSE 0
 // frame id message define:
-#define SENSOR_INFO			0x30
+#define SENSOR_INFO			0x30 //48 decimal
 #define SENSOR_receive_OFFSET	            0x31
-#define SENSOR_receive_SENSITIVITY		0x32
+#define SENSOR_receive_SENSITIVITY		0x32 //50 decimal
 #define SENSOR_transmitt_OFFSET		0x33
 #define SENSOR_transmitt_SENSITIVITY	0x34
+#define SENSOR_calibration	            0x35 //53 decimal
+#define SENSOR_TARE                             0x36 //54 decimal
 
 // for USART init. RCC USART ijungimas ner define, surast ir pakeist kode.
 #define LIN_USART       USART2
@@ -121,6 +123,7 @@ extern uint8_t debug_masyvas[10];
  uint8_t LIN_checksum_enhanced(uint8_t prot_ID, uint8_t *buffer, uint8_t length);
  uint8_t LIN_checksum_classic(uint8_t prot_ID, uint8_t *buffer, uint8_t length);
  uint8_t LIN_validate_response(uint8_t data_length);
+ float Hex_to_float(uint8_t *array, uint8_t start_index);
 /* Exported macro ------------------------------------------------------------*/
 /* Exported functions ------------------------------------------------------- */
 void TimingDelay_Decrement(void);

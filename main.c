@@ -88,7 +88,7 @@ float Vdd5V_AVG= 5000;
 float V_3v3_calculated=0;
 float AVG_V_3v3_calculated=3300;
 float Thermo_targetVpwm=0;
-float Newton=0;
+int16_t Newton=0;
 
 /* Vidurkinimo variables */
 uint16_t sumavimo_index1=0; 
@@ -136,10 +136,11 @@ bool LIN_slave_is_subscriber = 0; // by default device is publisher. If calibrat
 uint8_t LIN_RX_received_buffer[9] = {0}, LIN_rx_cnt=0; // then slave act as subscriber
 uint8_t LIN_transmission_active = 0;
 uint8_t LIN_TX_buffer[9] = {0}, LIN_tx_cnt=0, LIN_tx_total=0; // slave act as publisher
+uint8_t LIN_TX_data[9]={0};
 bool LIN_response_received = 0; // flag indicates then device get full frame response.
 uint8_t Parse_value_switch = SENSOR_receive_OFFSET; //for LIN subscriber values switch parsing
 uint8_t debug_masyvas[10] = {0x10, 0x11, 0x12, 0x13, 0x14,0x15,0x16,0x17};
-
+uint8_t debug = 0;
 /* Private function prototypes -----------------------------------------------*/
 float Get_8of10AVG(float buffer[]);
 float termocompensation(float Vtemp);
@@ -154,7 +155,7 @@ uint8_t offset_calib( void );
 float PI_con_Vsensor(float value, float target, float Kp, float Ki);
 void measureALL(void);
 float sensor_init(void);
-float get_Newton(int8_t offset_pol, float sensor_mV, float zeroForce_mV, float keof);
+int16_t get_Newton(int8_t offset_pol, float sensor_mV, float zeroForce_mV, float keof);
 void WriteValuesFLASH(float val1, uint8_t val2, float val3, float val4);
 float SetTARE_and_set_Flash(void);
 
@@ -217,7 +218,6 @@ int main(void)
   {    
    while (1)
     {
-      Delay(2);
 /*  KALIBRAVIMAS */      
       if (flag_calibruoti==1){
         calibravimo_rezult=offset_calib();//visi output daugiau nei 50decimal yra klaidos
@@ -237,7 +237,6 @@ int main(void)
         flag_koef=0;
       }
       
-
 /* ALL ADC AND SDADC MEASUREMENTS */
       measureALL();
       Thermo_targetVpwm=Vrefpwm_thermo( Tempe, targetVoltage);
@@ -252,15 +251,25 @@ int main(void)
       Newton = get_Newton( offset_poliarumas, AVG_VsensorMv,  zeroForce_mV,  Newton_koef);
 
   //-----------------------------------   LIN pradzia   ----------------------------------------------------------
-      LIN_TX_buffer[0]=(uint8_t)AVG_VrefMv;
-      LIN_TX_buffer[1]=(uint8_t)AVG_VsensorMv;
-      LIN_TX_buffer[2]=DUTY;
-      LIN_TX_buffer[3]=(uint8_t)Tempe+100;
-      LIN_TX_buffer[4]=(uint8_t)step_mv*1000;
-      LIN_TX_buffer[5]=(uint8_t)External_Vref;
-      LIN_TX_buffer[6]=(uint8_t)Thermo_targetVpwm;
-      LIN_TX_buffer[7]=0;
-        
+      LIN_TX_data[0]=(Newton & 0x00FF);      //lower  byte 1
+      LIN_TX_data[1]=(Newton >> 8)& 0x00FF; //uper byte 1
+      LIN_TX_data[2]=((uint16_t)AVG_VsensorMv & 0x00FF); 
+      LIN_TX_data[3]=((uint16_t)AVG_VsensorMv >> 8)& 0x00FF; //uper  byte 2
+      LIN_TX_data[4]=((uint16_t)AVG_VrefMv & 0x00FF); 
+      LIN_TX_data[5]=((uint16_t)AVG_VrefMv >> 8)& 0x00FF; //uper  byte 3
+      LIN_TX_data[6]=5;
+      LIN_TX_data[7]=1;                      
+      // debuginimas:
+    /*  LIN_TX_data[0]=(Newton & 0x00FF);       //lower  byte 1
+      LIN_TX_data[1]=((uint16_t)AVG_VsensorMv & 0x00FF);  //uper byte 1
+      LIN_TX_data[2]=debug; 
+      LIN_TX_data[3]=255-debug; //uper  byte 2
+      LIN_TX_data[4]=debug; 
+      LIN_TX_data[5]=240-debug; //uper  byte 3
+      LIN_TX_data[6]=232;
+      LIN_TX_data[7]=24;
+      debug++;*/
+      // end of debugunimas
       if(LIN_header_received){ // slave received new command from master -> respond to message
           LIN_header_received = 0; // clear flag
           Parse_value_switch = 0; // clear value
@@ -268,15 +277,18 @@ int main(void)
 // Device will be publisher:
                 case(SENSOR_INFO): // send sensor info
                           //sukrauti i masyva ir ...                                        
-                          LIN_start_transmission(LIN_TX_buffer, 8);
+                          LIN_start_transmission(LIN_TX_data, 8);
                     break;
-                case(SENSOR_transmitt_OFFSET): //sensor send current offset values
-                          //sukrauti i masyva ir ...
-                          LIN_start_transmission(LIN_TX_buffer, 8);
+                case(SENSOR_calibration): //sensor calibration
+                          //pradeti kalibravimo mechanizma
+                          calibravimo_rezult=offset_calib();            //visi output daugiau nei 50decimal yra klaidos
+                          targetVoltage = sensor_init();
+                          //nuskaitymas is flash pakeistos reiksmes
+                          temp = (uint32_t*)(pol_ADRESS);
+                          offset_poliarumas = *(uint8_t *)temp; 
                     break;
-                case(SENSOR_transmitt_SENSITIVITY): //sensor send current sensitivity values
-                          //sukrauti i masyva ir ...
-                          LIN_start_transmission(LIN_TX_buffer, 8);
+                case(SENSOR_TARE): //sensor taravimas
+                          zeroForce_mV=SetTARE_and_set_Flash();
                     break;
 // Device will be subscriber:
                 case(SENSOR_receive_OFFSET):  // sensor is receiving offset control value
@@ -304,7 +316,10 @@ int main(void)
 //		debug_masyvas[i] = LIN_RX_received_buffer[i];
                   break;
                 case(SENSOR_receive_SENSITIVITY):
-                          // galima is LIN_RX_received_buffer[] pasiimti duomenis
+                   //     naujas_Newton_koef  i sita sudet nauja reiksme;
+                     naujas_Newton_koef =  Hex_to_float(LIN_RX_received_buffer, 1);
+                    WriteValuesFLASH(targetVoltage, offset_poliarumas, zeroForce_mV, naujas_Newton_koef);
+                    Newton_koef=naujas_Newton_koef;
                   break;
                   
                 default: //error occured
@@ -317,21 +332,21 @@ int main(void)
   }//end of else
 }// end of main
 
-float get_Newton(int8_t offset_pol, float sensor_mV, float zeroForce_mV, float Newton_keof)
+int16_t get_Newton(int8_t offset_pol, float sensor_mV, float zeroForce_mV, float Newton_keof)
 { 
-  float Newton=0;
+  int16_t Newton=0;
   float skirtumas_mV=0;
   
   switch (offset_pol){
     case 1: //spaudziant itampa dideja
       skirtumas_mV=sensor_mV-zeroForce_mV;
       break;
-  case 2://spaudiant itampa mazeja
+  case 2://spaudziant itampa mazeja
       skirtumas_mV=zeroForce_mV-sensor_mV;
     break;
       }
   
-  Newton = skirtumas_mV/Newton_keof; 
+  Newton = (int16_t ) (skirtumas_mV/Newton_keof); 
   
   return Newton; 
 }
@@ -343,7 +358,7 @@ float PI_controller(float value, float target, float Kp, float Ki)
 
   error=target-value;
   if ( ((DUTY<PWM_PERIOD) && (DUTY>0)) && (Ki!=0) ){
-    integral = integral + (error)/10;}       
+    integral = integral + (error)/5000;}       
   output= (Kp*error+Ki*integral);
   
       //apsauga nuo integral suoliu, RIBAS reikia parinkti pagal matavimo diapazona
@@ -394,7 +409,7 @@ float PI_con_5V(float value, float target, float Kp, float Ki)
   
   error=target-value;
   if ( ((DUTY_5V<PWM_PERIOD_5V) && (DUTY_5V>0)) && (Ki!=0) ){
-    integral2 = integral2 + (error);} //reikia padauginti is iteration period______DEMESIO!!!!!!!!!!!!!!!!
+    integral2 = integral2 + (error)/100;} //reikia padauginti is iteration period______DEMESIO!!!!!!!!!!!!!!!!
   output= (Kp*error+Ki*integral2);
   
     //apsauga nuo integral suoliu, RIBAS reikia parinkti pagal matavimo diapazona
@@ -434,7 +449,8 @@ uint8_t offset_calib (void){
   uint32_t i=0;
   uint8_t flag_baigta=0;
   uint8_t Poliarumas=0;
-  float refPWM_target;
+  float refPWM_target=0;
+  float temp_Vsensor=0;
   
      /* local variable definition */
   uint8_t state = 1;
@@ -448,7 +464,8 @@ uint8_t offset_calib (void){
          ChangePWM_duty( PWM_PERIOD - 0 );  //Vref = 2mV
          Delay(100); //ms
          measureALL();
-         if (((SDADCData_Tab[0] + 32768) * step_mv_new)<=100)
+         temp_Vsensor=((SDADCData_Tab[0] + 32768) * step_mv_new);
+         if (temp_Vsensor <=100)
            state=2;  // offset neigiamas
          else 
            state=3; //offset teigiamas
@@ -478,7 +495,8 @@ uint8_t offset_calib (void){
          ChangePWM_duty( PWM_PERIOD - 50000 );  //Vref = 3300mV
          Delay(100); //ms
          measureALL();
-         if (((SDADCData_Tab[0] + 32768) * step_mv_new)>3180)
+         temp_Vsensor=((SDADCData_Tab[0] + 32768) * step_mv_new);
+         if ( temp_Vsensor >3180)
            state=4;  // offset tikrai  teigiamas
          else {
            output=97; //klaida, ofset neveikia kaip teigiamas
@@ -510,8 +528,8 @@ uint8_t offset_calib (void){
 
       default :
          output=99; //error
-   }
-   }
+    }//switch
+   }//while
   
   return output; 
 }
@@ -575,7 +593,6 @@ void measureALL(void)
               AVG_VrefMv= sumatorius2/10;  
               sumatorius2=0;
               sumavimo_index2=0;
-	  flag_send=1;
              }
         } 
 }
@@ -722,11 +739,13 @@ void LIN_send_data (uint8_t *buffer, uint8_t length)
 void LIN_start_transmission(uint8_t *buffer, uint8_t length)
 {
 	uint8_t i=0;
+       //     while(LIN_transmission_active) // palaukt kol pasibaigs sena
+       //     {}
 	LIN_tx_total = length+1; // 8 bytes and checksum
 	LIN_transmission_active = 1;
 	for(i=0; i<length; i++)
 		LIN_TX_buffer[i] = buffer[i]; // put values in transmitt buffer.
-	LIN_TX_buffer[length] = LIN_checksum_enhanced(LIN_protected_identifier, buffer, length); //last byte in array must be checksum
+	LIN_TX_buffer[length] = LIN_checksum_enhanced(LIN_protected_identifier, LIN_TX_buffer, length); //last byte in array must be checksum
 
 	USART_ITConfig(LIN_USART, USART_IT_TXE, ENABLE);	//start transmitt, end of transmission is in interrupt handler;
 }
@@ -734,32 +753,32 @@ void LIN_start_transmission(uint8_t *buffer, uint8_t length)
 uint8_t LIN_checksum_enhanced(uint8_t prot_ID, uint8_t *buffer, uint8_t length)
 {
 		uint8_t cheksum = 0;
-		uint16_t temp = 0;
+		uint16_t temporal = 0;
 		uint8_t i=0;
 
-		temp = prot_ID;
-		for(i=0; i<length; i=i+2){
-			temp += buffer[i] + buffer[i+1]; //add carry
-			if(temp > 255) // if owerflow, subtract 0xFF
-				temp = temp - 255;
+		temporal = prot_ID;                        
+		for(i=0; i<length; i++){
+			temporal +=buffer[i];
+			if(temporal >= 256) // if owerflow, subtract 0xFF
+                                      temporal = temporal - 255;
 		}
-		cheksum = 0xFF ^ temp; // invert
-
+		cheksum = 0xFF ^ (uint8_t)temporal; // invert
+                      //  cheksum = 0xFF & (~temp);
 		return cheksum;
 }
 // LIN spec 1.3 use classic checksum. Frame ID is not used, only data bytes.
 uint8_t LIN_checksum_classic(uint8_t prot_ID, uint8_t *buffer, uint8_t length)
 {
 		uint8_t cheksum = 0;
-		uint16_t temp = 0;
+		uint16_t temporal = 0;
 		uint8_t i=0;
 
-		for(i=0; i<length; i=i+2){
-			temp += buffer[i] + buffer[i+1]; //add carry
-			if(temp > 255) // if owerflow, subtract 0xFF
-				temp = temp - 255;
+		for(i=0; i<length; i++){
+			temp += buffer[i];
+			if(temporal >= 256) // if owerflow, subtract 0xFF
+				temporal = temporal - 255;
 		}
-		cheksum = 0xFF ^ temp; // invert
+		cheksum = 0xFF ^ temporal; // invert
 
 		return cheksum;
 }
@@ -793,6 +812,25 @@ void USART_Send_data(uint8_t *buffer, uint32_t length)
 			 USART_SendData(LIN_USART, *buffer);
 			 buffer++;
 		}
+}
+// grazina float reiksme padavus hex floatu masyva; start_index bus 1 pirmam skaiciui, 2 antram skaiciui
+float Hex_to_float(uint8_t *array, uint8_t start_index)
+{
+  float *address = 0; // pointeris kad bus float
+  uint8_t *p_array=0;
+  uint8_t temp_array[8] = {0}, i=0;
+  
+  for(i=0; i<8; i++ )
+    temp_array[i] = array[7-i]; // sudet reiksmes atvirksciatvarka i atminti;
+  if(start_index==1)
+    p_array = &temp_array[4];
+  else if(start_index==2)
+    p_array = &temp_array[0];
+  else
+    return 0;
+  address = (float*)p_array;
+    
+  return *address;
 }
 //====================================================================================================================
 /**

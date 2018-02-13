@@ -301,6 +301,7 @@ void SDADC3_IRQHandler(void)
 	  if (USART_GetITStatus(LIN_USART, USART_IT_ORE) == SET)
 	   {
 	   USART_ClearITPendingBit(LIN_USART, USART_IT_ORE);
+               USART_ClearITPendingBit(LIN_USART, USART_IT_FE);
 	   }
  }
  /******************************************************************************/
