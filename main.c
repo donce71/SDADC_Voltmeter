@@ -244,7 +244,7 @@ int main(void)
 /* Feedback: DUTY keiciu tik kas 100 matavimu, nes naudoju Vref AVG reiksme, kuri kinta tik cia if*/
       DUTY_5V = (uint16_t)PI_con_5V(Vdd5V, Vdd5V_target, 10,10);
       ChangePWM_5V_duty(DUTY_5V);
-      DUTY=(uint16_t)PI_controller(VrefMv,Thermo_targetVpwm,5,10);   //30,0.2   0.6,0.1    10,20
+      DUTY=(uint16_t)PI_controller(VrefMv,Thermo_targetVpwm,3,10);   //30,0.2   0.6,0.1    10,20
       ChangePWM_duty( PWM_PERIOD - DUTY );
 
 /* Convert to Newton */      
@@ -286,6 +286,7 @@ int main(void)
                           //nuskaitymas is flash pakeistos reiksmes
                           temp = (uint32_t*)(pol_ADRESS);
                           offset_poliarumas = *(uint8_t *)temp; 
+                          zeroForce_mV=SetTARE_and_set_Flash(); //taruoti butina po offset nuskaitymo
                     break;
                 case(SENSOR_TARE): //sensor taravimas
                           zeroForce_mV=SetTARE_and_set_Flash();
@@ -358,7 +359,7 @@ float PI_controller(float value, float target, float Kp, float Ki)
 
   error=target-value;
   if ( ((DUTY<PWM_PERIOD) && (DUTY>0)) && (Ki!=0) ){
-    integral = integral + (error)/5000;}       
+    integral = integral + (error)/8000;}       
   output= (Kp*error+Ki*integral);
   
       //apsauga nuo integral suoliu, RIBAS reikia parinkti pagal matavimo diapazona
@@ -465,8 +466,8 @@ uint8_t offset_calib (void){
          Delay(100); //ms
          measureALL();
          temp_Vsensor=((SDADCData_Tab[0] + 32768) * step_mv_new);
-         if (temp_Vsensor <=100)
-           state=2;  // offset neigiamas
+         if (temp_Vsensor <=100){
+           state=2;}  // offset neigiamas
          else 
            state=3; //offset teigiamas
          break;
@@ -496,8 +497,8 @@ uint8_t offset_calib (void){
          Delay(100); //ms
          measureALL();
          temp_Vsensor=((SDADCData_Tab[0] + 32768) * step_mv_new);
-         if ( temp_Vsensor >3180)
-           state=4;  // offset tikrai  teigiamas
+         if ( temp_Vsensor >3180){
+           state=4;}  // offset tikrai  teigiamas
          else {
            output=97; //klaida, ofset neveikia kaip teigiamas
            flag_baigta=1;}
@@ -572,8 +573,8 @@ void measureALL(void)
             kaupimo_index1=0;  
             sumatorius1+=Voltage_of_10;
             sumavimo_index1++;
-            if ( sumavimo_index1>9){
-              AVG_VsensorMv= sumatorius1/10;  
+            if ( sumavimo_index1>99){
+              AVG_VsensorMv= sumatorius1/100;  
               sumatorius1=0;
               sumavimo_index1=0; 
             }
@@ -589,8 +590,8 @@ void measureALL(void)
             kaupimo_index2=0;  
             sumatorius2+=Voltage_of_10;
             sumavimo_index2++;
-            if ( sumavimo_index2>9){
-              AVG_VrefMv= sumatorius2/10;  
+            if ( sumavimo_index2>99){
+              AVG_VrefMv= sumatorius2/100;  
               sumatorius2=0;
               sumavimo_index2=0;
              }
