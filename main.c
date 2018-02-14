@@ -89,6 +89,8 @@ float V_3v3_calculated=0;
 float AVG_V_3v3_calculated=3300;
 float Thermo_targetVpwm=0;
 int16_t Newton=0;
+int16_t Prior_Newton=0;
+int16_t Newton_skirtumas=0;
 
 /* Vidurkinimo variables */
 uint16_t sumavimo_index1=0; 
@@ -249,25 +251,26 @@ int main(void)
 
 /* Convert to Newton */      
       Newton = get_Newton( offset_poliarumas, AVG_VsensorMv,  zeroForce_mV,  Newton_koef);
+      Newton_skirtumas=Newton-Prior_Newton;
 
   //-----------------------------------   LIN pradzia   ----------------------------------------------------------
       LIN_TX_data[0]=(Newton & 0x00FF);      //lower  byte 1
       LIN_TX_data[1]=(Newton >> 8)& 0x00FF; //uper byte 1
-      LIN_TX_data[2]=((uint16_t)AVG_VsensorMv & 0x00FF); 
-      LIN_TX_data[3]=((uint16_t)AVG_VsensorMv >> 8)& 0x00FF; //uper  byte 2
-      LIN_TX_data[4]=((uint16_t)AVG_VrefMv & 0x00FF); 
-      LIN_TX_data[5]=((uint16_t)AVG_VrefMv >> 8)& 0x00FF; //uper  byte 3
+      LIN_TX_data[2]=(Prior_Newton & 0x00FF); 
+      LIN_TX_data[3]=(Prior_Newton >> 8)& 0x00FF; //uper  byte 2
+      LIN_TX_data[4]=(Newton_skirtumas & 0x00FF); 
+      LIN_TX_data[5]=(Newton_skirtumas >> 8)& 0x00FF; //uper  byte 3
       LIN_TX_data[6]=5;
       LIN_TX_data[7]=1;                      
       // debuginimas:
     /*  LIN_TX_data[0]=(Newton & 0x00FF);       //lower  byte 1
       LIN_TX_data[1]=((uint16_t)AVG_VsensorMv & 0x00FF);  //uper byte 1
       LIN_TX_data[2]=debug; 
-      LIN_TX_data[3]=255-debug; //uper  byte 2
-      LIN_TX_data[4]=debug; 
-      LIN_TX_data[5]=240-debug; //uper  byte 3
-      LIN_TX_data[6]=232;
-      LIN_TX_data[7]=24;
+      LIN_TX_data[3]=((uint16_t)AVG_VsensorMv >> 8)& 0x00FF; //uper  byte 2
+      LIN_TX_data[4]=((uint16_t)AVG_VrefMv & 0x00FF); 
+      LIN_TX_data[5]=((uint16_t)AVG_VrefMv >> 8)& 0x00FF; //uper  byte 3
+      LIN_TX_data[6]=5;
+      LIN_TX_data[7]=1;    
       debug++;*/
       // end of debugunimas
       if(LIN_header_received){ // slave received new command from master -> respond to message
@@ -450,7 +453,7 @@ uint8_t offset_calib (void){
   uint32_t i=0;
   uint8_t flag_baigta=0;
   uint8_t Poliarumas=0;
-  float refPWM_target=0;
+  float refPWM_calib=0;
   float temp_Vsensor=0;
   
      /* local variable definition */
@@ -481,9 +484,9 @@ uint8_t offset_calib (void){
          Delay(2);
          //Post_office( RxBuffer);
         }
-        if ( (AVG_VsensorMv>(Vs_offsetPOL1-2)) && (Vs_offsetPOL1<(100+2))  ){
+        if ( (AVG_VsensorMv>(Vs_offsetPOL1-2)) && (AVG_VsensorMv<(Vs_offsetPOL1+2))  ){
           output=1; // gerai sukalibruota neigiamas offset
-          refPWM_target= AVG_VrefMv;
+          refPWM_calib= AVG_VrefMv+0.25;
           Poliarumas=1;
           state=5; }
         else{
@@ -514,7 +517,7 @@ uint8_t offset_calib (void){
           }
          if (AVG_VsensorMv>(Vs_offsetPOL2-2) && AVG_VsensorMv<(Vs_offsetPOL2+2) ){
           output=4; // gerai sukalibruotas teigiamas offset
-          refPWM_target= AVG_VrefMv;
+          refPWM_calib= AVG_VrefMv;
           Poliarumas=2;
           state=5;}
          else {
@@ -523,7 +526,7 @@ uint8_t offset_calib (void){
          break;
          
        case 5 ://irasome i atminti
-            WriteValuesFLASH(refPWM_target, Poliarumas, zeroForce_mV,  Newton_koef);
+            WriteValuesFLASH(refPWM_calib, Poliarumas, zeroForce_mV,  Newton_koef);
             flag_baigta=1;
          break;
 
@@ -577,6 +580,7 @@ void measureALL(void)
               AVG_VsensorMv= sumatorius1/100;  
               sumatorius1=0;
               sumavimo_index1=0; 
+              Prior_Newton=Newton; // GAL TAIP DARYTI IR NEREIK
             }
         }
        
