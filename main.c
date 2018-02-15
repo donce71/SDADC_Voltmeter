@@ -203,6 +203,10 @@ int main(void)
     temp = (uint32_t*)(Tare_ADRESS);
   zeroForce_mV = *(float *)temp; 
   
+  // DEBUGINIMUI ISTRINTI PASKUI
+  ChangePWM_5V_duty(20000);
+  ChangePWM_duty( 50000 );
+  
   /* Test DMA1 TC flag */
   while((DMA_GetFlagStatus(DMA1_FLAG_TC1)) == RESET ); 
   /* Clear DMA TC flag */
@@ -241,16 +245,16 @@ int main(void)
       
 /* ALL ADC AND SDADC MEASUREMENTS */
       measureALL();
-      Thermo_targetVpwm=Vrefpwm_thermo( Tempe, targetVoltage);
+/*      Thermo_targetVpwm=Vrefpwm_thermo( Tempe, targetVoltage);
             
 /* Feedback: DUTY keiciu tik kas 100 matavimu, nes naudoju Vref AVG reiksme, kuri kinta tik cia if*/
-      DUTY_5V = (uint16_t)PI_con_5V(Vdd5V, Vdd5V_target, 10,10);
+/*      DUTY_5V = (uint16_t)PI_con_5V(Vdd5V, Vdd5V_target, 10,10);
       ChangePWM_5V_duty(DUTY_5V);
       DUTY=(uint16_t)PI_controller(VrefMv,Thermo_targetVpwm,3,10);   //30,0.2   0.6,0.1    10,20
       ChangePWM_duty( PWM_PERIOD - DUTY );
 
 /* Convert to Newton */      
-      Newton = get_Newton( offset_poliarumas, AVG_VsensorMv,  zeroForce_mV,  Newton_koef);
+/*      Newton = get_Newton( offset_poliarumas, AVG_VsensorMv,  zeroForce_mV,  Newton_koef);
       Newton_skirtumas=Newton-Prior_Newton;
 
   //-----------------------------------   LIN pradzia   ----------------------------------------------------------
@@ -862,6 +866,7 @@ static uint32_t SDADC1_Config(void)
 
   /* Set the SDADC divider: The SDADC should run @6MHz */
   /* If Sysclk is 72MHz, SDADC divider should be 12 */
+  /* FOR slow mode 1.5MHz, 72Mhz/48 = 1.5Mhz/*
   RCC_SDADCCLKConfig(RCC_SDADCCLK_SYSCLK_Div48);
 
   /* RCC_AHBPeriph_GPIOB Peripheral clock enable */
@@ -1136,6 +1141,8 @@ void USART2_Configuration(void)
   USART_ITConfig(LIN_USART, USART_IT_TXE, DISABLE);
   USART_ITConfig(LIN_USART, USART_IT_ORE , ENABLE);
   USART_ITConfig(LIN_USART, USART_IT_LBD, ENABLE);
+  USART_ITConfig(LIN_USART, USART_IT_FE, ENABLE);
+  USART_ITConfig(LIN_USART, USART_IT_NE, ENABLE);
 
   USART_LINBreakDetectLengthConfig(LIN_USART, USART_LINBreakDetectLength_11b);
   USART_LINCmd(LIN_USART, ENABLE);
