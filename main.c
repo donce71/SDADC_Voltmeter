@@ -2,7 +2,7 @@
   ******************************************************************************
   * @file    SDADC/SDADC_Voltmeter/main.c 
   * @author  Donatas
-  * @version V1.23.7
+  * @version V1.23.8
   * @date    19-February-2018
   * @brief   Main program body
   * Rx - PA2  TX - PA3, UART2 
@@ -31,6 +31,7 @@
   * 2018-02-04 Naujas Post Office
   * 2018-02-08 PWMref target kompensacija (Vref) ir LIN
   * 2018-02-12 Newton perskaiciavimo funkcijos ir Flash irasymas koeficientu
+  * 2018-02-19 Sitas kodas matuoja SDADC nuo 0mV, kopija Prezentacijos kodo, su Lin Be uzluzimo pakeitimais. Lin be uzluzimo neveikia gerai. 
  ******************************************************************************
   */
 
@@ -171,7 +172,6 @@ void InitializeTimer(uint32_t PWM_PERIOD, uint32_t PWM_PERIOD_5V);
 void InitializePWMChannel(void);
 void ADC_init( void );
 void DMA_initSDADC(void);
-void DMA_init_ADC (void);
 void ChangePWM_duty( uint16_t PULSE );
 void ChangePWM_5V_duty( uint16_t PULSE );
 
@@ -183,17 +183,15 @@ int main(void)
   /* SysTick end of count event each 1ms */
   RCC_GetClocksFreq(&RCC_Clocks);
   SysTick_Config(RCC_Clocks.HCLK_Frequency / 1000);
-/*    
+    
   GPIO_init();
   USART2_Configuration();
- 
   InitializeTimer(PWM_PERIOD, PWM_PERIOD_5V);
   InitializePWMChannel();
-  DMA_init_ADC(); 
   ADC_init();
- */ DMA_initSDADC();
+  DMA_initSDADC();
  
-  /*vref_internal_calibrated = *((uint16_t *)(VREF_INTERNAL_BASE_ADDRESS)); //ADC reiksme kai Vdd=3.3V
+  vref_internal_calibrated = *((uint16_t *)(VREF_INTERNAL_BASE_ADDRESS)); //ADC reiksme kai Vdd=3.3V
   Vref_internal_itampa= (vref_internal_calibrated)*3300/ 4095; //Vidinio Vref itampa
   Vref_internal_itampa= 1229;                // Kalibruojant su PICOLOG
   targetVoltage = sensor_init();
@@ -206,12 +204,8 @@ int main(void)
     temp = (uint32_t*)(Tare_ADRESS);
   zeroForce_mV = *(float *)temp; 
   
-  // DEBUGINIMUI ISTRINTI PASKUI
-  ChangePWM_5V_duty(20000);
-  ChangePWM_duty( 50000 );
- */ 
   /* Test DMA1 TC flag */
-//  while((DMA_GetFlagStatus(DMA1_FLAG_TC1)) == RESET ); 
+  while((DMA_GetFlagStatus(DMA1_FLAG_TC1)) == RESET ); 
   /* Clear DMA TC flag */
   DMA_ClearFlag(DMA1_FLAG_TC1);
 
@@ -248,16 +242,16 @@ int main(void)
       
 /* ALL ADC AND SDADC MEASUREMENTS */
       measureALL();
-/*      Thermo_targetVpwm=Vrefpwm_thermo( Tempe, targetVoltage);
+      Thermo_targetVpwm=Vrefpwm_thermo( Tempe, targetVoltage);
             
 /* Feedback: DUTY keiciu tik kas 100 matavimu, nes naudoju Vref AVG reiksme, kuri kinta tik cia if*/
       DUTY_5V = (uint16_t)PI_con_5V(Vdd5V, Vdd5V_target, 10,10);
       ChangePWM_5V_duty(DUTY_5V);
- //     DUTY=(uint16_t)PI_controller(VrefMv,Thermo_targetVpwm,3,10);   //30,0.2   0.6,0.1    10,20
+      DUTY=(uint16_t)PI_controller(VrefMv,Thermo_targetVpwm,3,10);   //30,0.2   0.6,0.1    10,20
       ChangePWM_duty( PWM_PERIOD - DUTY );
 
 /* Convert to Newton */      
-/*      Newton = get_Newton( offset_poliarumas, AVG_VsensorMv,  zeroForce_mV,  Newton_koef);
+      Newton = get_Newton( offset_poliarumas, AVG_VsensorMv,  zeroForce_mV,  Newton_koef);
       Newton_skirtumas=Newton-Prior_Newton;
 
   //-----------------------------------   LIN pradzia   ----------------------------------------------------------
@@ -869,7 +863,6 @@ static uint32_t SDADC1_Config(void)
 
   /* Set the SDADC divider: The SDADC should run @6MHz */
   /* If Sysclk is 72MHz, SDADC divider should be 12 */
-  /* FOR slow mode 1.5MHz, 72Mhz/48 = 1.5Mhz/*
   RCC_SDADCCLKConfig(RCC_SDADCCLK_SYSCLK_Div48);
 
   /* RCC_AHBPeriph_GPIOB Peripheral clock enable */
@@ -1144,6 +1137,7 @@ void USART2_Configuration(void)
   USART_ITConfig(LIN_USART, USART_IT_TXE, DISABLE);
   USART_ITConfig(LIN_USART, USART_IT_ORE , ENABLE);
   USART_ITConfig(LIN_USART, USART_IT_LBD, ENABLE);
+  
   USART_ITConfig(LIN_USART, USART_IT_FE, ENABLE);
   USART_ITConfig(LIN_USART, USART_IT_NE, ENABLE);
 
@@ -1157,13 +1151,36 @@ void ADC_init( )
 { 
    /* ADCCLK = PCLK2/4 */
   RCC_ADCCLKConfig(RCC_PCLK2_Div4); 
-    
+  
+  /* DMA1 clock enable */
+  RCC_AHBPeriphClockCmd(RCC_AHBPeriph_DMA1 , ENABLE);
+  
+  /* DMA1 Channel1 Config */
+  DMA_DeInit(DMA1_Channel1);
+  DMA_InitStructure.DMA_PeripheralBaseAddr = (uint32_t)ADC1_DR_Address;
+  DMA_InitStructure.DMA_MemoryBaseAddr = (uint32_t)RegularConvData_Tab;
+  DMA_InitStructure.DMA_DIR = DMA_DIR_PeripheralSRC;
+  DMA_InitStructure.DMA_BufferSize = 3;
+  DMA_InitStructure.DMA_PeripheralInc = DMA_PeripheralInc_Disable;
+  DMA_InitStructure.DMA_MemoryInc = DMA_MemoryInc_Enable;
+  DMA_InitStructure.DMA_PeripheralDataSize = DMA_PeripheralDataSize_HalfWord;
+  DMA_InitStructure.DMA_MemoryDataSize = DMA_MemoryDataSize_HalfWord;
+  DMA_InitStructure.DMA_Mode = DMA_Mode_Circular;
+  DMA_InitStructure.DMA_Priority = DMA_Priority_High;
+  DMA_InitStructure.DMA_M2M = DMA_M2M_Disable;
+  DMA_Init(DMA1_Channel1, &DMA_InitStructure);
+  /* DMA1 Channel1 enable */
+  DMA_Cmd(DMA1_Channel1, ENABLE);
+  
   /* ADC1 Periph clock enable */
   RCC_APB2PeriphClockCmd(RCC_APB2Periph_ADC1, ENABLE);
   
   /* ADCs DeInit */  
   ADC_DeInit(ADC1);
-    
+  
+    /* Enable ADC_DMA */
+  ADC_DMACmd(ADC1, ENABLE);  
+  
   /* Initialize ADC structure */
   ADC_StructInit(&ADC_InitStructure);
   
@@ -1199,32 +1216,6 @@ void ADC_init( )
   
   /* Enable ADC1 */
   ADC_Cmd(ADC1, ENABLE);     
-}
-
-void DMA_init_ADC ()
-{
-     /* DMA1 clock enable */
-  RCC_AHBPeriphClockCmd(RCC_AHBPeriph_DMA1 , ENABLE);
-  
-  /* DMA1 Channel1 Config */
-  DMA_DeInit(DMA1_Channel1);
-  DMA_InitStructure.DMA_PeripheralBaseAddr = (uint32_t)ADC1_DR_Address;
-  DMA_InitStructure.DMA_MemoryBaseAddr = (uint32_t)RegularConvData_Tab;
-  DMA_InitStructure.DMA_DIR = DMA_DIR_PeripheralSRC;
-  DMA_InitStructure.DMA_BufferSize = 3;
-  DMA_InitStructure.DMA_PeripheralInc = DMA_PeripheralInc_Disable;
-  DMA_InitStructure.DMA_MemoryInc = DMA_MemoryInc_Enable;
-  DMA_InitStructure.DMA_PeripheralDataSize = DMA_PeripheralDataSize_HalfWord;
-  DMA_InitStructure.DMA_MemoryDataSize = DMA_MemoryDataSize_HalfWord;
-  DMA_InitStructure.DMA_Mode = DMA_Mode_Circular;
-  DMA_InitStructure.DMA_Priority = DMA_Priority_High;
-  DMA_InitStructure.DMA_M2M = DMA_M2M_Disable;
-  DMA_Init(DMA1_Channel1, &DMA_InitStructure);
-  /* DMA1 Channel1 enable */
-  DMA_Cmd(DMA1_Channel1, ENABLE);
-  /* Enable ADC_DMA */
-  ADC_DMACmd(ADC1, ENABLE); 
-  
 }
 
 void GPIO_init(){
