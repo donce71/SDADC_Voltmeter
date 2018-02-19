@@ -203,7 +203,7 @@ int main(void)
 /* Feedback: DUTY keiciu tik kas 100 matavimu, nes naudoju Vref AVG reiksme, kuri kinta tik cia if*/
       DUTY_5V = PI_con_5V(Vdd5V, Vdd5V_target, 10,10);
       ChangePWM_5V_duty(DUTY_5V);
-      DUTY=PI_controller(VrefMv,targetVoltage,10,20);   //30,0.2   0.6,0.1    10,20
+//      DUTY=PI_controller(VrefMv,targetVoltage,10,20);   //30,0.2   0.6,0.1    10,20
       ChangePWM_duty( PWM_PERIOD - DUTY );
             
 /* Transmit */
