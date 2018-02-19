@@ -184,10 +184,10 @@ int main(void)
   RCC_GetClocksFreq(&RCC_Clocks);
   SysTick_Config(RCC_Clocks.HCLK_Frequency / 1000);
     
-  GPIO_init();
-  USART2_Configuration();
-  InitializeTimer(PWM_PERIOD, PWM_PERIOD_5V);
-  InitializePWMChannel();
+ // GPIO_init();
+//  USART2_Configuration();
+//  InitializeTimer(PWM_PERIOD, PWM_PERIOD_5V);
+//  InitializePWMChannel();
   ADC_init();
   DMA_initSDADC();
  
@@ -245,13 +245,13 @@ int main(void)
       Thermo_targetVpwm=Vrefpwm_thermo( Tempe, targetVoltage);
             
 /* Feedback: DUTY keiciu tik kas 100 matavimu, nes naudoju Vref AVG reiksme, kuri kinta tik cia if*/
-      DUTY_5V = (uint16_t)PI_con_5V(Vdd5V, Vdd5V_target, 10,10);
+ /*     DUTY_5V = (uint16_t)PI_con_5V(Vdd5V, Vdd5V_target, 10,10);
       ChangePWM_5V_duty(DUTY_5V);
       DUTY=(uint16_t)PI_controller(VrefMv,Thermo_targetVpwm,3,10);   //30,0.2   0.6,0.1    10,20
       ChangePWM_duty( PWM_PERIOD - DUTY );
 
 /* Convert to Newton */      
-      Newton = get_Newton( offset_poliarumas, AVG_VsensorMv,  zeroForce_mV,  Newton_koef);
+  /*    Newton = get_Newton( offset_poliarumas, AVG_VsensorMv,  zeroForce_mV,  Newton_koef);
       Newton_skirtumas=Newton-Prior_Newton;
 
   //-----------------------------------   LIN pradzia   ----------------------------------------------------------
