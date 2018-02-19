@@ -171,6 +171,7 @@ void InitializeTimer(uint32_t PWM_PERIOD, uint32_t PWM_PERIOD_5V);
 void InitializePWMChannel(void);
 void ADC_init( void );
 void DMA_initSDADC(void);
+void DMA_init_ADC (void);
 void ChangePWM_duty( uint16_t PULSE );
 void ChangePWM_5V_duty( uint16_t PULSE );
 
@@ -182,15 +183,17 @@ int main(void)
   /* SysTick end of count event each 1ms */
   RCC_GetClocksFreq(&RCC_Clocks);
   SysTick_Config(RCC_Clocks.HCLK_Frequency / 1000);
-    
+/*    
   GPIO_init();
-  //USART2_Configuration();
+  USART2_Configuration();
+ 
   InitializeTimer(PWM_PERIOD, PWM_PERIOD_5V);
   InitializePWMChannel();
+  DMA_init_ADC(); 
   ADC_init();
-  DMA_initSDADC();
+ */ DMA_initSDADC();
  
-  vref_internal_calibrated = *((uint16_t *)(VREF_INTERNAL_BASE_ADDRESS)); //ADC reiksme kai Vdd=3.3V
+  /*vref_internal_calibrated = *((uint16_t *)(VREF_INTERNAL_BASE_ADDRESS)); //ADC reiksme kai Vdd=3.3V
   Vref_internal_itampa= (vref_internal_calibrated)*3300/ 4095; //Vidinio Vref itampa
   Vref_internal_itampa= 1229;                // Kalibruojant su PICOLOG
   targetVoltage = sensor_init();
@@ -206,9 +209,9 @@ int main(void)
   // DEBUGINIMUI ISTRINTI PASKUI
   ChangePWM_5V_duty(20000);
   ChangePWM_duty( 50000 );
-  
+ */ 
   /* Test DMA1 TC flag */
-  while((DMA_GetFlagStatus(DMA1_FLAG_TC1)) == RESET ); 
+//  while((DMA_GetFlagStatus(DMA1_FLAG_TC1)) == RESET ); 
   /* Clear DMA TC flag */
   DMA_ClearFlag(DMA1_FLAG_TC1);
 
@@ -1154,36 +1157,13 @@ void ADC_init( )
 { 
    /* ADCCLK = PCLK2/4 */
   RCC_ADCCLKConfig(RCC_PCLK2_Div4); 
-  
-  /* DMA1 clock enable */
-  RCC_AHBPeriphClockCmd(RCC_AHBPeriph_DMA1 , ENABLE);
-  
-  /* DMA1 Channel1 Config */
-  DMA_DeInit(DMA1_Channel1);
-  DMA_InitStructure.DMA_PeripheralBaseAddr = (uint32_t)ADC1_DR_Address;
-  DMA_InitStructure.DMA_MemoryBaseAddr = (uint32_t)RegularConvData_Tab;
-  DMA_InitStructure.DMA_DIR = DMA_DIR_PeripheralSRC;
-  DMA_InitStructure.DMA_BufferSize = 3;
-  DMA_InitStructure.DMA_PeripheralInc = DMA_PeripheralInc_Disable;
-  DMA_InitStructure.DMA_MemoryInc = DMA_MemoryInc_Enable;
-  DMA_InitStructure.DMA_PeripheralDataSize = DMA_PeripheralDataSize_HalfWord;
-  DMA_InitStructure.DMA_MemoryDataSize = DMA_MemoryDataSize_HalfWord;
-  DMA_InitStructure.DMA_Mode = DMA_Mode_Circular;
-  DMA_InitStructure.DMA_Priority = DMA_Priority_High;
-  DMA_InitStructure.DMA_M2M = DMA_M2M_Disable;
-  DMA_Init(DMA1_Channel1, &DMA_InitStructure);
-  /* DMA1 Channel1 enable */
-  DMA_Cmd(DMA1_Channel1, ENABLE);
-  
+    
   /* ADC1 Periph clock enable */
   RCC_APB2PeriphClockCmd(RCC_APB2Periph_ADC1, ENABLE);
   
   /* ADCs DeInit */  
   ADC_DeInit(ADC1);
-  
-    /* Enable ADC_DMA */
-  ADC_DMACmd(ADC1, ENABLE);  
-  
+    
   /* Initialize ADC structure */
   ADC_StructInit(&ADC_InitStructure);
   
@@ -1219,6 +1199,32 @@ void ADC_init( )
   
   /* Enable ADC1 */
   ADC_Cmd(ADC1, ENABLE);     
+}
+
+void DMA_init_ADC ()
+{
+     /* DMA1 clock enable */
+  RCC_AHBPeriphClockCmd(RCC_AHBPeriph_DMA1 , ENABLE);
+  
+  /* DMA1 Channel1 Config */
+  DMA_DeInit(DMA1_Channel1);
+  DMA_InitStructure.DMA_PeripheralBaseAddr = (uint32_t)ADC1_DR_Address;
+  DMA_InitStructure.DMA_MemoryBaseAddr = (uint32_t)RegularConvData_Tab;
+  DMA_InitStructure.DMA_DIR = DMA_DIR_PeripheralSRC;
+  DMA_InitStructure.DMA_BufferSize = 3;
+  DMA_InitStructure.DMA_PeripheralInc = DMA_PeripheralInc_Disable;
+  DMA_InitStructure.DMA_MemoryInc = DMA_MemoryInc_Enable;
+  DMA_InitStructure.DMA_PeripheralDataSize = DMA_PeripheralDataSize_HalfWord;
+  DMA_InitStructure.DMA_MemoryDataSize = DMA_MemoryDataSize_HalfWord;
+  DMA_InitStructure.DMA_Mode = DMA_Mode_Circular;
+  DMA_InitStructure.DMA_Priority = DMA_Priority_High;
+  DMA_InitStructure.DMA_M2M = DMA_M2M_Disable;
+  DMA_Init(DMA1_Channel1, &DMA_InitStructure);
+  /* DMA1 Channel1 enable */
+  DMA_Cmd(DMA1_Channel1, ENABLE);
+  /* Enable ADC_DMA */
+  ADC_DMACmd(ADC1, ENABLE); 
+  
 }
 
 void GPIO_init(){
