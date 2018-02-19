@@ -43,9 +43,9 @@
 /* Private define ------------------------------------------------------------*/
 /* Private macro -------------------------------------------------------------*/
 /* Private variables ---------------------------------------------------------*/
-extern int16_t InjectedConvDataCh4;
+/*extern int16_t InjectedConvDataCh4;
 extern int16_t InjectedConvDataCh8;
-extern int16_t InjectedConvDataCh7;
+extern int16_t InjectedConvDataCh7;*/
 extern int16_t InjectedConvData3Ch7;
 extern int16_t ping_pong = 0;
 
@@ -53,7 +53,7 @@ extern int16_t ping_pong = 0;
 
 /* Private function prototypes -----------------------------------------------*/
 /* Private functions ---------------------------------------------------------*/
-
+ void  USART2_IRQHandler(void);
 /******************************************************************************/
 /*            Cortex-M4 Processor Exceptions Handlers                         */
 /******************************************************************************/
@@ -205,6 +205,117 @@ void SDADC3_IRQHandler(void)
     InjectedConvData3Ch7 = SDADC_GetInjectedConversionValue(SDADC3, &ChannelIndex);  
   } 
 }
+/******************************************************************************/
+ /*                LIN Interrupt Handlers                   */
+
+ /******************************************************************************/
+ void  USART2_IRQHandler(void)
+ {
+	 uint8_t new_data = 0; // most recently received byte in usart interrupt handler
+	 uint8_t frame_parity = 0 ; //parity received
+	 uint8_t parity_P0=0, parity_P1=0,  calculate_parity=0 ; // 2 parity bits calculated from equations;
+
+   /* USART in mode Receiver --------------------------------------------------*/
+   if (USART_GetITStatus(LIN_USART, USART_IT_RXNE) == SET)
+   {
+ 	  	 USART_ClearITPendingBit(LIN_USART, USART_IT_RXNE);
+ 	  	 new_data = USART_ReceiveData(LIN_USART);
+
+ 	  	 //---- LIN device is subscriber
+		  if(LIN_slave_is_subscriber){
+			 LIN_RX_received_buffer[LIN_rx_cnt] = new_data;
+			 LIN_rx_cnt++;
+//			 if(LIN_rx_cnt ==9 ){ // 9 bytes received. Last byte is checksum.
+//				 LIN_rx_cnt = 0;
+//				 LIN_slave_is_subscriber = 0;
+//				 calc_checksum =  LIN_checksum_enhanced(LIN_protected_identifier, LIN_RX_received_buffer,8);
+//				 if(LIN_RX_received_buffer[8] == calc_checksum) // check if data is valid
+//					 LIN_response_received = 1;
+//			 }
+			 //== Frame ID indicates data length.
+			 if((LIN_identifier<32) && (LIN_rx_cnt ==3)){ // 2 data bytes and checksum
+				 LIN_response_received = LIN_validate_response(2);
+			 }
+
+			 if((LIN_identifier<48) && (LIN_identifier>31) && (LIN_rx_cnt == 5)){// 4 data bytes and checksum
+				 LIN_response_received = LIN_validate_response(4);
+			 }
+			 if((LIN_identifier<60) && (LIN_identifier>47) && (LIN_rx_cnt == 9)){// 8 data bytes and checksum
+				 LIN_response_received = LIN_validate_response(8);
+			 }
+			 if(LIN_rx_cnt > 9) // for protection
+				 LIN_rx_cnt = 0;
+		 }
+		  //---- LIN device is waiting for header start
+ 	  	 else if((new_data == 0x55) && (LIN_frame_started == 0))
+ 	  		LIN_frame_started = 1; // if lin frame started, next byte will be frame identifier
+
+		  //---- LIN device is waiting for frame ID
+ 	  	 else if(LIN_frame_started){
+ 	  		 frame_parity = (new_data & 0xC0) >> 6; // parity received;
+ 	  		 parity_P0 = (new_data & 0x1) ^ ((new_data & 0x2)>>1) ^ ((new_data & 0x4)>>2) ^ ((new_data & 0x10)>>4) ; // P0 calculation: ID0 xor ID1 xor ID2 xor ID4
+ 	  		 parity_P1 = 1^(((new_data & 0x2)>>1) ^ ((new_data & 0x8)>>3) ^ ((new_data & 0x10)>>4) ^ ((new_data & 0x20)>>5));// P1 calculation: not(ID1 xor ID3 xor ID4 xor ID5)
+ 	  		 calculate_parity = parity_P0 | (parity_P1<<1); // parity calculated
+ 	  		 if( frame_parity ==  calculate_parity){ // if received parity is equal calculated -> ID received correctly, else ignore.
+ 	  		   	LIN_identifier = new_data & 0x3F; // 7, 8 bits are for parity!
+ 	  		   	LIN_protected_identifier = new_data;
+				LIN_header_received = 1;
+ 	  		 }
+ 	  		 LIN_frame_started = 0; // clear flag.
+ 	  	 }
+
+   }
+	/* USART in mode transmitter  -------------------------------------------------------------------------------*/
+	 if (USART_GetITStatus(LIN_USART, USART_IT_TXE) == SET)
+	  {
+	   USART_ClearITPendingBit(LIN_USART, USART_IT_TXE);
+	   /* Write one byte to the transmit data register */
+	  	   USART_SendData(LIN_USART,  LIN_TX_buffer[LIN_tx_cnt++]);
+	      if(LIN_tx_cnt == LIN_tx_total)	// if all bytes are sent
+	      {		// clear flags
+	    	  LIN_transmission_active = 0;
+	    	  memset(LIN_TX_buffer, 0, LIN_tx_cnt);
+	    	  LIN_tx_cnt =0;
+	    	  LIN_tx_total=0;
+	        /* Disable the transmit interrupt */
+	        USART_ITConfig(LIN_USART, USART_IT_TXE, DISABLE);
+	  	  }
+	  }
+   /* USART detected line break -------------------------------------------------------------------------------*/
+   if (USART_GetITStatus(LIN_USART, USART_IT_LBD) == SET)
+    {
+	   USART_ClearITPendingBit(LIN_USART, USART_IT_LBD);
+	   USART_ClearITPendingBit(LIN_USART, USART_IT_FE);
+	   USART_ClearITPendingBit(LIN_USART, USART_IT_ORE);
+/* If break happens during communication = ABORT */
+	   LIN_frame_started = 0;
+	   LIN_identifier = 0;
+	   LIN_protected_identifier = 0;
+	   LIN_header_received = 0;
+	   LIN_slave_is_subscriber = 0;
+	   LIN_response_received = 0;
+	   LIN_rx_cnt = 0;
+	   memset(LIN_RX_received_buffer, 0, 9);
+    }
+   /* USART detected error -------------------------------------------------------------------------------*/
+	  if (USART_GetITStatus(LIN_USART, USART_IT_ORE) == SET)
+	   {
+	   USART_ClearITPendingBit(LIN_USART, USART_IT_ORE);
+               USART_ClearITPendingBit(LIN_USART, USART_IT_FE);
+	   }
+              if (USART_GetITStatus(LIN_USART, USART_IT_FE) == SET)
+	   {
+	   USART_ClearITPendingBit(LIN_USART, USART_IT_ORE);
+               USART_ClearITPendingBit(LIN_USART, USART_IT_FE);
+	   }
+            if (USART_GetITStatus(LIN_USART, USART_IT_NE) == SET)
+	   {
+	   USART_ClearITPendingBit(LIN_USART, USART_IT_NE);
+               USART_ClearITPendingBit(LIN_USART, USART_IT_FE);
+	   }
+ }
+ /******************************************************************************/
+/*
 uint32_t cnt = 0;
 void DMA2_Channel3_IRQHandler(void)
 {
@@ -214,6 +325,7 @@ void DMA2_Channel3_IRQHandler(void)
     cnt++;
   }
 }
+*/
 /**
   * @brief  This function handles PPP interrupt request.
   * @param  None
