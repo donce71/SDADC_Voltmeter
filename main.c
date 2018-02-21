@@ -2,8 +2,8 @@
   ******************************************************************************
   * @file    SDADC/SDADC_Voltmeter/main.c 
   * @author  Donatas
-  * @version V1.23.8
-  * @date    19-February-2018
+  * @version V1.23.9
+  * @date    21-February-2018
   * @brief   Main program body
   * Rx - PA2  TX - PA3, UART2 
   * SDADC PB2 
@@ -31,8 +31,9 @@
   * 2018-02-04 Naujas Post Office
   * 2018-02-08 PWMref target kompensacija (Vref) ir LIN
   * 2018-02-12 Newton perskaiciavimo funkcijos ir Flash irasymas koeficientu
-  * 2018-02-19 Sitas kodas matuoja SDADC nuo 0mV, kopija Prezentacijos kodo, su Lin Be uzluzimo pakeitimais. Lin be uzluzimo neveikia gerai. 
- ******************************************************************************
+  * 2018-02-19 Sitas kodas matuoja SDADC nuo 0mV, kopija Prezentacijos kodo, su Lin Be uzluzimo pakeitimais. Lin be uzluzimo neveikia gerai. Problema buvo su comment SDADC clock
+  * 2018-02-21 Temperaturos matavimas pagal External 3V ref su SAR
+******************************************************************************
   */
 
 
@@ -80,10 +81,12 @@ float Voltage_buffer2[10] = {0};
 float Voltage_of_10=0;
 float ADC_Vtemp=0; 
 float ADC_Vref=0;
+float ADC_3Vref_temp=0;
 float new_temp=0;
 float External_Vref=0;
 float step_mv_new=0;
 float step_mv=0;
+float fixed_step=0;
 float Vdd5V= 5000;
 float Vdd5V_AVG= 5000;
 float V_3v3_calculated=0;
@@ -184,10 +187,10 @@ int main(void)
   RCC_GetClocksFreq(&RCC_Clocks);
   SysTick_Config(RCC_Clocks.HCLK_Frequency / 1000);
     
- // GPIO_init();
-//  USART2_Configuration();
-//  InitializeTimer(PWM_PERIOD, PWM_PERIOD_5V);
-//  InitializePWMChannel();
+  GPIO_init();
+  USART2_Configuration();
+  InitializeTimer(PWM_PERIOD, PWM_PERIOD_5V);
+  InitializePWMChannel();
   ADC_init();
   DMA_initSDADC();
  
@@ -245,13 +248,13 @@ int main(void)
       Thermo_targetVpwm=Vrefpwm_thermo( Tempe, targetVoltage);
             
 /* Feedback: DUTY keiciu tik kas 100 matavimu, nes naudoju Vref AVG reiksme, kuri kinta tik cia if*/
- /*     DUTY_5V = (uint16_t)PI_con_5V(Vdd5V, Vdd5V_target, 10,10);
+      DUTY_5V = (uint16_t)PI_con_5V(Vdd5V, Vdd5V_target, 10,10);
       ChangePWM_5V_duty(DUTY_5V);
       DUTY=(uint16_t)PI_controller(VrefMv,Thermo_targetVpwm,3,10);   //30,0.2   0.6,0.1    10,20
       ChangePWM_duty( PWM_PERIOD - DUTY );
 
 /* Convert to Newton */      
-  /*    Newton = get_Newton( offset_poliarumas, AVG_VsensorMv,  zeroForce_mV,  Newton_koef);
+      Newton = get_Newton( offset_poliarumas, AVG_VsensorMv,  zeroForce_mV,  Newton_koef);
       Newton_skirtumas=Newton-Prior_Newton;
 
   //-----------------------------------   LIN pradzia   ----------------------------------------------------------
@@ -262,18 +265,8 @@ int main(void)
       LIN_TX_data[4]=(Newton_skirtumas & 0x00FF); 
       LIN_TX_data[5]=(Newton_skirtumas >> 8)& 0x00FF; //uper  byte 3
       LIN_TX_data[6]=5;
-      LIN_TX_data[7]=1;                      
-      // debuginimas:
-    /*  LIN_TX_data[0]=(Newton & 0x00FF);       //lower  byte 1
-      LIN_TX_data[1]=((uint16_t)AVG_VsensorMv & 0x00FF);  //uper byte 1
-      LIN_TX_data[2]=debug; 
-      LIN_TX_data[3]=((uint16_t)AVG_VsensorMv >> 8)& 0x00FF; //uper  byte 2
-      LIN_TX_data[4]=((uint16_t)AVG_VrefMv & 0x00FF); 
-      LIN_TX_data[5]=((uint16_t)AVG_VrefMv >> 8)& 0x00FF; //uper  byte 3
-      LIN_TX_data[6]=5;
-      LIN_TX_data[7]=1;    
-      debug++;*/
-      // end of debugunimas
+      LIN_TX_data[7]=1;      
+      
       if(LIN_header_received){ // slave received new command from master -> respond to message
           LIN_header_received = 0; // clear flag
           Parse_value_switch = 0; // clear value
@@ -544,15 +537,18 @@ void measureALL(void)
 /* SAR ADC */
        ADC_Vref=RegularConvData_Tab[0]; 
        ADC_Vtemp=RegularConvData_Tab[1];
-/* Thermocompensations */  
+       ADC_3Vref_temp=RegularConvData_Tab[2];  
        
-/*     ateiciai, maitinimo itampai tiksliai suzinoti ir nereikes tada vidinio ref naudoti  
-      V_3v3_calculated=(step_mv*65535)*1.037;
-      AVG_V_3v3_calculated = V_3v3_calculated + (V_3v3_calculated - AVG_V_3v3_calculated)/1000;
-*/       
-       Vref_internal_itampa=termocompensation(ADC_Vtemp); 
-       VDD_ref=4095.0*(Vref_internal_itampa/ADC_Vref);
-       new_temp=temperature(VDD_ref,ADC_Vtemp);                 // atiduoda laipsnius
+/* 3.6V arba 3.3V maitinimo itampos iskaiciavimas */ 
+      fixed_step = 3000.45 /(SDADCData_Tab[1]+32768); // priimu kad External 3Vref cia nesikeicia (veliau ji kompensuosiu)
+      V_3v3_calculated=(fixed_step*65535)+105.3; //1.037
+      AVG_V_3v3_calculated = V_3v3_calculated + (V_3v3_calculated - AVG_V_3v3_calculated)/1000;     
+       
+/* Temperaturos iskaiciavimas */      
+//       Vref_internal_itampa=termocompensation(ADC_Vtemp); 
+//       VDD_ref=4095.0*(Vref_internal_itampa/ADC_Vref);
+//       new_temp=temperature(VDD_ref,ADC_Vtemp);                 // atiduoda laipsnius
+       new_temp=temperature(AVG_V_3v3_calculated,ADC_3Vref_temp);
        Tempe=Tempe+(new_temp-Tempe)/100;
        External_Vref = thermo_Vref(Tempe);
        
@@ -664,12 +660,13 @@ float termocompensation(float ADC_temperature){ //is ADC_temp gauna internal Vre
   return result;
 }
 
-float temperature(float ADC_vdd, float ADC_temperature){ //______________________Pataisyti
+float temperature(float ADC_VddmV, float ADC_temperature_bit){ //______________________Pataisyti
     float tempe_degree;
     float tempe_mV;
-    tempe_mV=(ADC_vdd/4095)*ADC_temperature; 
-    tempe_degree=- 0.24*tempe_mV +360 ; 
-    //tempe_degree=-0.0008*tempe_mV*tempe_mV + 1.7501*tempe_mV - 872.8 ; 
+    tempe_mV=(ADC_VddmV/4095)*ADC_temperature_bit; 
+    tempe_degree= 0.3788*tempe_mV -192.8 ;     
+//    tempe_mV=(ADC_vdd/4095)*ADC_temperature; 
+//    tempe_degree=- 0.24*tempe_mV +360 ; 
   return tempe_degree;
 }
 
@@ -1196,7 +1193,7 @@ void ADC_init( )
   ADC_RegularChannelConfig(ADC1, ADC_Channel_Vrefint, 1, ADC_SampleTime_239Cycles5);
   /* Vtemperature */ 
   ADC_RegularChannelConfig(ADC1, ADC_Channel_TempSensor, 2, ADC_SampleTime_239Cycles5);
-    /* 5V Vdd*/ 
+    /*Temperatura from 3V reference*/ 
   ADC_RegularChannelConfig(ADC1, ADC_Channel_0, 3, ADC_SampleTime_239Cycles5);
   
   ADC_TempSensorVrefintCmd(ENABLE);
