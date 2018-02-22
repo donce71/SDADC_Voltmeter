@@ -53,8 +53,8 @@
 #define SDADC_GAIN           (float) 1  /* SDADC internal gain is set to 1: update this define*/
 #define K_GAIN               (float) 1.03  /* Kalibravimo gain, cia pagal Vref_2.5V */
 
+#define IA_Gain               (float) 330  /*Instrumentinio operacinio stiprinimas*/
 
-#define POT_SDADC_CHANNEL    SDADC_Channel_5
 #define SDADC_RESOL          (int32_t) 65535 /* 2e16 - 1 */
 #define SDADC_INIT_TIMEOUT   30 /* ~ about two SDADC clock cycles after INIT is set */
 #define SDADC_CAL_TIMEOUT    4*30720 /*  ~5.12 ms at 6 MHz  in a single calibration sequence */

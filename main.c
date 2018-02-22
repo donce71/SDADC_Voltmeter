@@ -2,8 +2,8 @@
   ******************************************************************************
   * @file    SDADC/SDADC_Voltmeter/main.c 
   * @author  Donatas
-  * @version V1.23.9
-  * @date    21-February-2018
+  * @version V1.23.10
+  * @date    22-February-2018
   * @brief   Main program body
   * Rx - PA2  TX - PA3, UART2 
   * SDADC PB2 
@@ -33,6 +33,7 @@
   * 2018-02-12 Newton perskaiciavimo funkcijos ir Flash irasymas koeficientu
   * 2018-02-19 Sitas kodas matuoja SDADC nuo 0mV, kopija Prezentacijos kodo, su Lin Be uzluzimo pakeitimais. Lin be uzluzimo neveikia gerai. Problema buvo su comment SDADC clock
   * 2018-02-21 Temperaturos matavimas pagal External 3V ref su SAR
+  * 2018-02-22 Pacio sensoriaus termokompensacija
 ******************************************************************************
   */
 
@@ -161,7 +162,7 @@ uint8_t offset_calib( void );
 float PI_con_Vsensor(float value, float target, float Kp, float Ki);
 void measureALL(void);
 float sensor_init(void);
-int16_t get_Newton(int8_t offset_pol, float sensor_mV, float zeroForce_mV, float keof);
+int16_t get_Newton(int8_t offset_pol, float sensor_mV, float zeroForce_mV, float keof, float temperatura);
 void WriteValuesFLASH(float val1, uint8_t val2, float val3, float val4);
 float SetTARE_and_set_Flash(void);
 
@@ -254,7 +255,7 @@ int main(void)
       ChangePWM_duty( PWM_PERIOD - DUTY );
 
 /* Convert to Newton */      
-      Newton = get_Newton( offset_poliarumas, AVG_VsensorMv,  zeroForce_mV,  Newton_koef);
+      Newton = get_Newton( offset_poliarumas, AVG_VsensorMv,  zeroForce_mV,  Newton_koef, Tempe);
       Newton_skirtumas=Newton-Prior_Newton;
 
   //-----------------------------------   LIN pradzia   ----------------------------------------------------------
@@ -330,10 +331,11 @@ int main(void)
   }//end of else
 }// end of main
 
-int16_t get_Newton(int8_t offset_pol, float sensor_mV, float zeroForce_mV, float Newton_keof)
+int16_t get_Newton(int8_t offset_pol, float sensor_mV, float zeroForce_mV, float Newton_keof, float temperatura)
 { 
   int16_t Newton=0;
   float skirtumas_mV=0;
+  float Vsenor_diff_thermo=0;
   
   switch (offset_pol){
     case 1: //spaudziant itampa dideja
@@ -343,6 +345,9 @@ int16_t get_Newton(int8_t offset_pol, float sensor_mV, float zeroForce_mV, float
       skirtumas_mV=zeroForce_mV-sensor_mV;
     break;
       }
+  //sensoriaus termokompensacija. Koeficientus iskaiciavau kai sensoriaus offset pradinis (be varzu), apie -0.65mV
+  Vsenor_diff_thermo=(-0.0032*temperatura - 0.0955)*IA_Gain;        //cia iskompensuoja tik sensoriaus drifft. Jeigu kinta Vrefmazasis, jis cia nekompensuojamas
+  skirtumas_mV=skirtumas_mV-Vsenor_diff_thermo;
   
   Newton = (int16_t ) (skirtumas_mV/Newton_keof); 
   
