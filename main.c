@@ -110,7 +110,7 @@ float integral=0;
 float integral2=0;
 float integral3=0;
 
-float targetVoltage=0;
+float targetVoltagePWM=0;
 float targetVref_mazas=0;
 float AVG_error=0;
 int8_t flag_send=0;
@@ -198,7 +198,7 @@ int main(void)
   vref_internal_calibrated = *((uint16_t *)(VREF_INTERNAL_BASE_ADDRESS)); //ADC reiksme kai Vdd=3.3V
   Vref_internal_itampa= (vref_internal_calibrated)*3300/ 4095; //Vidinio Vref itampa
   Vref_internal_itampa= 1229;                // Kalibruojant su PICOLOG
-  targetVoltage = sensor_init();
+  targetVoltagePWM = sensor_init();
 
    //nuskaitymas is flash 
     temp = (uint32_t*)(pol_ADRESS);
@@ -228,7 +228,7 @@ int main(void)
 /*  KALIBRAVIMAS */      
       if (flag_calibruoti==1){
         calibravimo_rezult=offset_calib();//visi output daugiau nei 50decimal yra klaidos
-        targetVoltage = sensor_init();
+        targetVoltagePWM = sensor_init();
         //nuskaitymas is flash 
         temp = (uint32_t*)(pol_ADRESS);
         offset_poliarumas = *(uint8_t *)temp; 
@@ -239,16 +239,16 @@ int main(void)
         flag_tare=0;
       }
       if (flag_koef==1){
-        WriteValuesFLASH(targetVoltage, offset_poliarumas, zeroForce_mV, naujas_Newton_koef);
+        WriteValuesFLASH(targetVoltagePWM, offset_poliarumas, zeroForce_mV, naujas_Newton_koef);
         Newton_koef=naujas_Newton_koef;
         flag_koef=0;
       }
       
 /* ALL ADC AND SDADC MEASUREMENTS */
       measureALL();
-      Thermo_targetVpwm=Vrefpwm_thermo( Tempe, targetVoltage);
+      Thermo_targetVpwm=Vrefpwm_thermo( Tempe, targetVoltagePWM);
             
-/* Feedback: DUTY keiciu tik kas 100 matavimu, nes naudoju Vref AVG reiksme, kuri kinta tik cia if*/
+/* Feedback control*/
       DUTY_5V = (uint16_t)PI_con_5V(Vdd5V, Vdd5V_target, 10,10);
       ChangePWM_5V_duty(DUTY_5V);
       DUTY=(uint16_t)PI_controller(VrefMv,Thermo_targetVpwm,3,10);   //30,0.2   0.6,0.1    10,20
@@ -280,7 +280,7 @@ int main(void)
                 case(SENSOR_calibration): //sensor calibration
                           //pradeti kalibravimo mechanizma
                           calibravimo_rezult=offset_calib();            //visi output daugiau nei 50decimal yra klaidos
-                          targetVoltage = sensor_init();
+                          targetVoltagePWM = sensor_init();
                           //nuskaitymas is flash pakeistos reiksmes
                           temp = (uint32_t*)(pol_ADRESS);
                           offset_poliarumas = *(uint8_t *)temp; 
@@ -317,7 +317,7 @@ int main(void)
                 case(SENSOR_receive_SENSITIVITY):
                    //     naujas_Newton_koef  i sita sudet nauja reiksme;
                      naujas_Newton_koef =  Hex_to_float(LIN_RX_received_buffer, 1);
-                    WriteValuesFLASH(targetVoltage, offset_poliarumas, zeroForce_mV, naujas_Newton_koef);
+                    WriteValuesFLASH(targetVoltagePWM, offset_poliarumas, zeroForce_mV, naujas_Newton_koef);
                     Newton_koef=naujas_Newton_koef;
                   break;
                   
@@ -360,8 +360,8 @@ float PI_controller(float value, float target, float Kp, float Ki)
   float error=0;
 
   error=target-value;
-  if ( ((DUTY<PWM_PERIOD) && (DUTY>0)) && (Ki!=0) ){
-    integral = integral + (error)/8000;}       
+  if ( ((DUTY<PWM_PERIOD) && (DUTY>0)) && (Ki!=0) ){ //anti windup
+    integral = integral + (error)/1000;}       
   output= (Kp*error+Ki*integral);
   
       //apsauga nuo integral suoliu, RIBAS reikia parinkti pagal matavimo diapazona
@@ -389,7 +389,7 @@ float PI_con_Vsensor(float value, float target, float Kp, float Ki)
   
       //apsauga nuo integral suoliu, RIBAS reikia parinkti pagal matavimo diapazona
   if ((DUTY==0 || DUTY==PWM_PERIOD) && (error>1500 || error<-1500)  )
-      integral=0;
+      integral3=0;
      
   if( output > PWM_PERIOD )
       output = PWM_PERIOD;
@@ -1339,14 +1339,13 @@ float SetTARE_and_set_Flash(){
       Delay(1); 
 /* ALL ADC AND SDADC MEASUREMENTS */
       measureALL();
-      Thermo_targetVpwm=Vrefpwm_thermo( Tempe, targetVoltage);
-/* Feedback: DUTY keiciu tik kas 100 matavimu, nes naudoju Vref AVG reiksme, kuri kinta tik cia if*/
+      Thermo_targetVpwm=Vrefpwm_thermo( Tempe, targetVoltagePWM);
       DUTY_5V = (uint16_t)PI_con_5V(Vdd5V, Vdd5V_target, 10,10);
       ChangePWM_5V_duty(DUTY_5V);
       DUTY=(uint16_t)PI_controller(VrefMv,Thermo_targetVpwm,5,10);   //30,0.2   0.6,0.1    10,20
       ChangePWM_duty( PWM_PERIOD - DUTY );
    }
-  WriteValuesFLASH(targetVoltage, offset_poliarumas, AVG_VsensorMv, Newton_koef);
+  WriteValuesFLASH(targetVoltagePWM, offset_poliarumas, AVG_VsensorMv, Newton_koef);
   
   return AVG_VsensorMv;
 }
