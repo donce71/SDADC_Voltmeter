@@ -2,8 +2,8 @@
   ******************************************************************************
   * @file    SDADC/SDADC_Voltmeter/main.c 
   * @author  Donatas
-  * @version V1.23.10
-  * @date    22-February-2018
+  * @version V1.23.11
+  * @date    26-February-2018
   * @brief   Main program body
   * Rx - PA2  TX - PA3, UART2 
   * SDADC PB2 
@@ -34,6 +34,7 @@
   * 2018-02-19 Sitas kodas matuoja SDADC nuo 0mV, kopija Prezentacijos kodo, su Lin Be uzluzimo pakeitimais. Lin be uzluzimo neveikia gerai. Problema buvo su comment SDADC clock
   * 2018-02-21 Temperaturos matavimas pagal External 3V ref su SAR
   * 2018-02-22 Pacio sensoriaus termokompensacija
+  * 2018-02-26 Papildomas Timer kalibravimui
 ******************************************************************************
   */
 
@@ -131,7 +132,9 @@ float RxBuffer[11]={0xFFF,0xFFF,0xFFF,0xFFF,0xFFF,0xFFF,0xFFF,0xFFF,0xFFF,0xFFF,
 uint8_t calibravimo_rezult=0;
 uint8_t flag_tare=0;
 uint8_t flag_koef=0;
+uint8_t flag_TIM3=0;
 float naujas_Newton_koef=0;
+ uint32_t counter=0;
 
 
 /* Private variables  for LIN commmunication*/
@@ -178,7 +181,19 @@ void ADC_init( void );
 void DMA_initSDADC(void);
 void ChangePWM_duty( uint16_t PULSE );
 void ChangePWM_5V_duty( uint16_t PULSE );
+void TIM3_IRQHandler(void) ;
+void TIM3_switch (uint8_t status);
 
+
+void TIM3_IRQHandler(void) //taravimo ir kalibravimo timer
+{  
+  if (TIM_GetITStatus(TIM3, TIM_IT_Update) != RESET)
+  {
+    TIM_ClearITPendingBit(TIM3, TIM_IT_Update);
+    flag_TIM3=1;
+    TIM3_switch(0);
+  }   
+ }
 
 int main(void)
 {
@@ -449,11 +464,13 @@ uint16_t histereze_5V(float value, uint16_t current_PWM) //pradinis variantas, d
 uint8_t offset_calib (void){
   
   uint8_t output=0;
-  uint32_t i=0;
   uint8_t flag_baigta=0;
   uint8_t Poliarumas=0;
   float refPWM_calib=0;
   float temp_Vsensor=0;
+
+  counter=0;
+  flag_TIM3=0;
   
      /* local variable definition */
   uint8_t state = 1;
@@ -476,16 +493,17 @@ uint8_t offset_calib (void){
          
       case 2 : //algoritmas kai offset neigiamas
          // valdiklis su target 100mV, o matuojama itampa yra AVG_Vsensor
-        for( i=1;i<7000;i++){                           //___________________3000 apie 10sekundziu
+        TIM3_switch(1);
+        while (flag_TIM3==0){
          measureALL();
          DUTY=(uint16_t)PI_con_Vsensor(VsensorMv, Vs_offsetPOL1, 0.5, 1.5); // target 50mV  0.2 1
          ChangePWM_duty( PWM_PERIOD - DUTY );
-         Delay(2);
-         //Post_office( RxBuffer);
+         Delay(1); //ms
+         counter+=1;
         }
         if ( (AVG_VsensorMv>(Vs_offsetPOL1-2)) && (AVG_VsensorMv<(Vs_offsetPOL1+2))  ){
           output=1; // gerai sukalibruota neigiamas offset
-          refPWM_calib= AVG_VrefMv+0.25;
+          refPWM_calib= AVG_VrefMv;
           Poliarumas=1;
           state=5; }
         else{
@@ -507,12 +525,12 @@ uint8_t offset_calib (void){
          break;
          
       case 4 ://algoritmas kai offset teigiamas
-         for( i=1;i<7000;i++){               //_________________________pamazinti laika
+        TIM3_switch(1);
+        while (flag_TIM3==0){
           measureALL();
           DUTY=(uint16_t)PI_con_Vsensor(VsensorMv, Vs_offsetPOL2, 0.2, 1); // target 3.18V  0.2 1
           ChangePWM_duty( PWM_PERIOD - DUTY ); 
-          Delay(2);
-          //Post_office( RxBuffer);
+          Delay(1);
           }
          if (AVG_VsensorMv>(Vs_offsetPOL2-2) && AVG_VsensorMv<(Vs_offsetPOL2+2) ){
           output=4; // gerai sukalibruotas teigiamas offset
@@ -550,9 +568,6 @@ void measureALL(void)
       AVG_V_3v3_calculated = V_3v3_calculated + (V_3v3_calculated - AVG_V_3v3_calculated)/1000;     
        
 /* Temperaturos iskaiciavimas */      
-//       Vref_internal_itampa=termocompensation(ADC_Vtemp); 
-//       VDD_ref=4095.0*(Vref_internal_itampa/ADC_Vref);
-//       new_temp=temperature(VDD_ref,ADC_Vtemp);                 // atiduoda laipsnius
        new_temp=temperature(AVG_V_3v3_calculated,ADC_3Vref_temp);
        Tempe=Tempe+(new_temp-Tempe)/100;
        External_Vref = thermo_Vref(Tempe);
@@ -1282,6 +1297,27 @@ void InitializeTimer(uint32_t PWM_PERIOD, uint32_t PWM_PERIOD_5V)
     timerInitStructure.TIM_RepetitionCounter = 0;
     TIM_TimeBaseInit(TIM2, &timerInitStructure);
     TIM_Cmd(TIM2, ENABLE);  
+    
+ /************ TIMER3 skirtas taravimui ir kalibravimui*********/
+       /* Cycle timer interrupt */
+    NVIC_InitStructure.NVIC_IRQChannel = TIM3_IRQn;
+    NVIC_InitStructure.NVIC_IRQChannelPreemptionPriority = 1;
+    NVIC_InitStructure.NVIC_IRQChannelSubPriority=1;
+    NVIC_InitStructure.NVIC_IRQChannelCmd = ENABLE;
+    NVIC_Init(&NVIC_InitStructure);
+
+    /* timer controlling step frequency */
+    /* APB1 72MHz */
+    RCC_APB1PeriphClockCmd(RCC_APB1Periph_TIM3, ENABLE);
+
+    timerInitStructure.TIM_Prescaler = 36000-1; 
+    timerInitStructure.TIM_CounterMode = TIM_CounterMode_Up; // Skaiciuoti i pliusa
+    timerInitStructure.TIM_Period = 10000; // Periodos 
+    timerInitStructure.TIM_ClockDivision = TIM_CKD_DIV1;
+    timerInitStructure.TIM_RepetitionCounter = 0;
+    TIM_TimeBaseInit(TIM3, &timerInitStructure);
+    
+//    TIM3_switch(1);
 }
 
 void InitializePWMChannel()
@@ -1308,6 +1344,18 @@ void InitializePWMChannel()
     TIM_OC1PreloadConfig(TIM2, TIM_OCPreload_Enable);
  
     GPIO_PinAFConfig(GPIOA, GPIO_PinSource15, GPIO_AF_1);    
+}
+
+void TIM3_switch (uint8_t status){
+  
+    if(status == 1){
+        TIM_ClearITPendingBit(TIM3, TIM_IT_Update);
+        TIM_ITConfig(TIM3, TIM_IT_Update, ENABLE);
+        TIM_Cmd(TIM3, ENABLE);
+      }else if(status == 0){
+        TIM_ITConfig(TIM3, TIM_IT_Update, DISABLE);
+        TIM_Cmd(TIM3, DISABLE);
+      }
 }
 
 float sensor_init(void)
