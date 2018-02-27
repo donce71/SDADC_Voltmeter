@@ -2,8 +2,8 @@
   ******************************************************************************
   * @file    SDADC/SDADC_Voltmeter/main.c 
   * @author  Donatas
-  * @version V1.23.11
-  * @date    26-February-2018
+  * @version V1.23.12
+  * @date    27-February-2018
   * @brief   Main program body
   * Rx - PA2  TX - PA3, UART2 
   * SDADC PB2 
@@ -34,7 +34,7 @@
   * 2018-02-19 Sitas kodas matuoja SDADC nuo 0mV, kopija Prezentacijos kodo, su Lin Be uzluzimo pakeitimais. Lin be uzluzimo neveikia gerai. Problema buvo su comment SDADC clock
   * 2018-02-21 Temperaturos matavimas pagal External 3V ref su SAR
   * 2018-02-22 Pacio sensoriaus termokompensacija
-  * 2018-02-26 Papildomas Timer kalibravimui
+  * 2018-02-26 Papildomas Timer3 kalibravimui
 ******************************************************************************
   */
 
