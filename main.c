@@ -2,8 +2,8 @@
   ******************************************************************************
   * @file    SDADC/SDADC_Voltmeter/main.c 
   * @author  Donatas
-  * @version V1.23.12
-  * @date    27-February-2018
+  * @version V1.23.13
+  * @date    02-March-2018
   * @brief   Main program body
   * Rx - PA2  TX - PA3, UART2 
   * SDADC PB2 
@@ -35,6 +35,7 @@
   * 2018-02-21 Temperaturos matavimas pagal External 3V ref su SAR
   * 2018-02-22 Pacio sensoriaus termokompensacija
   * 2018-02-26 Papildomas Timer3 kalibravimui
+  * 2018-03-02 SAR PA1 ir PWM PB3 3.6V control     
 ******************************************************************************
   */
 
@@ -62,9 +63,11 @@ int16_t InjectedConvData3Ch7 = 0;
 __IO uint32_t TimingDelay = 0;
 uint32_t PWM_PERIOD=50000;
 uint32_t PWM_PERIOD_5V=50000;
+uint32_t PWM_PERIOD_3V6=50000;
 uint16_t DUTY=9424;
 uint16_t DUTY_5V=16000;
-__IO uint16_t RegularConvData_Tab[3];
+uint16_t DUTY_3V6=0;
+__IO uint16_t RegularConvData_Tab[2];
 __IO int16_t SDADCData_Tab[3];
 
 /* ADC variables */
@@ -81,9 +84,8 @@ float AVG_VDD_ref_NEW=3300;
 float Voltage_buffer[10] = {0};
 float Voltage_buffer2[10] = {0};
 float Voltage_of_10=0;
-float ADC_Vtemp=0; 
-float ADC_Vref=0;
 float ADC_3Vref_temp=0;
+float ADC_3V6_divider=0;
 float new_temp=0;
 float External_Vref=0;
 float step_mv_new=0;
@@ -175,12 +177,13 @@ static uint32_t SDADC1_Config(void);
 static uint32_t SDADC3_Config(void);
 void USART2_Configuration(void);
 void GPIO_init(void);
-void InitializeTimer(uint32_t PWM_PERIOD, uint32_t PWM_PERIOD_5V);
+void InitializeTimer(uint32_t PWM_PERIOD, uint32_t PWM_PERIOD_5V, uint32_t PWM_PERIOD_3V6);
 void InitializePWMChannel(void);
 void ADC_init( void );
 void DMA_initSDADC(void);
 void ChangePWM_duty( uint16_t PULSE );
 void ChangePWM_5V_duty( uint16_t PULSE );
+void ChangePWM_3v6_duty( uint16_t PULSE );
 void TIM3_IRQHandler(void) ;
 void TIM3_switch (uint8_t status);
 
@@ -205,7 +208,7 @@ int main(void)
     
   GPIO_init();
   USART2_Configuration();
-  InitializeTimer(PWM_PERIOD, PWM_PERIOD_5V);
+  InitializeTimer(PWM_PERIOD, PWM_PERIOD_5V,PWM_PERIOD_3V6 );
   InitializePWMChannel();
   ADC_init();
   DMA_initSDADC();
@@ -265,9 +268,11 @@ int main(void)
             
 /* Feedback control*/
       DUTY_5V = (uint16_t)PI_con_5V(Vdd5V, Vdd5V_target, 10,10);
-      ChangePWM_5V_duty(DUTY_5V);
+      ChangePWM_5V_duty(PWM_PERIOD_5V-DUTY_5V);                  //____________DEMESIO cia reikia invertuoti
       DUTY=(uint16_t)PI_controller(VrefMv,Thermo_targetVpwm,3,10);   //30,0.2   0.6,0.1    10,20
       ChangePWM_duty( PWM_PERIOD - DUTY );
+      
+      ChangePWM_3v6_duty(PWM_PERIOD_3V6- DUTY_3V6);
 
 /* Convert to Newton */      
       Newton = get_Newton( offset_poliarumas, AVG_VsensorMv,  zeroForce_mV,  Newton_koef, Tempe);
@@ -557,12 +562,13 @@ uint8_t offset_calib (void){
 
 void measureALL(void)
 {
+  float vcc_3V6=0;
+  float AVG_vcc_3V6 =0;
 /* SAR ADC */
-       ADC_Vref=RegularConvData_Tab[0]; 
-       ADC_Vtemp=RegularConvData_Tab[1];
-       ADC_3Vref_temp=RegularConvData_Tab[2];  
+       ADC_3Vref_temp=RegularConvData_Tab[0];  
+       ADC_3V6_divider=RegularConvData_Tab[1]; 
        
-/* 3.6V arba 3.3V maitinimo itampos iskaiciavimas */ 
+/* 3.6V arba 3.3V maitinimo itampos iskaiciavimas is external 3Vref*/ 
       fixed_step = 3000.45 /(SDADCData_Tab[1]+32768); // priimu kad External 3Vref cia nesikeicia (veliau ji kompensuosiu)
       V_3v3_calculated=(fixed_step*65535)+105.3; //1.037
       AVG_V_3v3_calculated = V_3v3_calculated + (V_3v3_calculated - AVG_V_3v3_calculated)/1000;     
@@ -578,11 +584,12 @@ void measureALL(void)
       
       VsensorMv = (SDADCData_Tab[0] + 32768) * step_mv;
       VrefMv =    (SDADCData_Tab[2] + 32768) * step_mv;
-      
-      //5 Vdd matavimas
+/* Compute 5V supply */        
       Vdd5V =    ((InjectedConvData3Ch7 + 32768) * step_mv)/0.6175; //su Gwinstek matuojant 0.6175 atitnka 5V, kai varzos 2.4K ir 3.9K
       Vdd5V_AVG = Vdd5V_AVG + (Vdd5V - Vdd5V_AVG)/200;
-      
+/* Compute 3.6V supply */ 
+      vcc_3V6 =    ADC_3V6_divider *0.8; //su Gwinstek matuojant 0.6175 atitnka 5V, kai varzos 2.4K ir 3.9K
+      AVG_vcc_3V6 = AVG_vcc_3V6 + (vcc_3V6 - AVG_vcc_3V6)/200;
 /* vidurkinimas Vsensor*/
        if (kaupimo_index1<10){     //kaupiame 10 reiksmiu bufferi
           Voltage_buffer[kaupimo_index1]=VsensorMv;
@@ -1177,7 +1184,7 @@ void ADC_init( )
   DMA_InitStructure.DMA_PeripheralBaseAddr = (uint32_t)ADC1_DR_Address;
   DMA_InitStructure.DMA_MemoryBaseAddr = (uint32_t)RegularConvData_Tab;
   DMA_InitStructure.DMA_DIR = DMA_DIR_PeripheralSRC;
-  DMA_InitStructure.DMA_BufferSize = 3;
+  DMA_InitStructure.DMA_BufferSize = 2;
   DMA_InitStructure.DMA_PeripheralInc = DMA_PeripheralInc_Disable;
   DMA_InitStructure.DMA_MemoryInc = DMA_MemoryInc_Enable;
   DMA_InitStructure.DMA_PeripheralDataSize = DMA_PeripheralDataSize_HalfWord;
@@ -1206,15 +1213,17 @@ void ADC_init( )
   ADC_InitStructure.ADC_ContinuousConvMode = ENABLE;
   ADC_InitStructure.ADC_ExternalTrigConv = ADC_ExternalTrigConv_None;
   ADC_InitStructure.ADC_DataAlign = ADC_DataAlign_Right;
-  ADC_InitStructure.ADC_NbrOfChannel = 3;
+  ADC_InitStructure.ADC_NbrOfChannel = 2;
   ADC_Init(ADC1, &ADC_InitStructure);
   
   /* Convert the ADC1 Channel 9 with 55.5 Cycles as sampling time */ 
-  ADC_RegularChannelConfig(ADC1, ADC_Channel_Vrefint, 1, ADC_SampleTime_239Cycles5);
+//  ADC_RegularChannelConfig(ADC1, ADC_Channel_Vrefint, 1, ADC_SampleTime_239Cycles5);
   /* Vtemperature */ 
-  ADC_RegularChannelConfig(ADC1, ADC_Channel_TempSensor, 2, ADC_SampleTime_239Cycles5);
-    /*Temperatura from 3V reference*/ 
-  ADC_RegularChannelConfig(ADC1, ADC_Channel_0, 3, ADC_SampleTime_239Cycles5);
+ // ADC_RegularChannelConfig(ADC1, ADC_Channel_TempSensor, 2, ADC_SampleTime_239Cycles5);
+    /*Temperatura from 3V reference PA0*/ 
+  ADC_RegularChannelConfig(ADC1, ADC_Channel_0, 1, ADC_SampleTime_239Cycles5);
+    /*3V6 votlage control PA1*/ 
+  ADC_RegularChannelConfig(ADC1, ADC_Channel_1, 2, ADC_SampleTime_239Cycles5);
   
   ADC_TempSensorVrefintCmd(ENABLE);
     
@@ -1272,10 +1281,22 @@ void GPIO_init(){
   GPIO_InitStructure.GPIO_OType = GPIO_OType_PP;
   GPIO_InitStructure.GPIO_PuPd = GPIO_PuPd_NOPULL;
   GPIO_Init(GPIOB, &GPIO_InitStructure);
+    //SAR ADC pins PA0 and PA1
+   RCC_AHBPeriphClockCmd(RCC_AHBPeriph_GPIOA, ENABLE);
+   GPIO_InitStructure.GPIO_Pin = GPIO_Pin_0 | GPIO_Pin_1;
+   GPIO_InitStructure.GPIO_Mode = GPIO_Mode_AN;
+   GPIO_InitStructure.GPIO_PuPd = GPIO_PuPd_NOPULL;
+   GPIO_Init(GPIOA, &GPIO_InitStructure);
+    //PWM 3.6V control PB3
+   RCC_AHBPeriphClockCmd(RCC_AHBPeriph_GPIOB, ENABLE);
+   GPIO_InitStructure.GPIO_Pin = GPIO_Pin_3;
+   GPIO_InitStructure.GPIO_PuPd = GPIO_PuPd_NOPULL;
+   GPIO_Init(GPIOB, &GPIO_InitStructure);
   }
 
-void InitializeTimer(uint32_t PWM_PERIOD, uint32_t PWM_PERIOD_5V)
-{
+void InitializeTimer(uint32_t PWM_PERIOD, uint32_t PWM_PERIOD_5V, uint32_t PWM_PERIOD_3V6 )
+{          
+    // Timer for Vref pwm
     RCC_APB1PeriphClockCmd(RCC_APB1Periph_TIM4, ENABLE);
 
     TIM_TimeBaseInitTypeDef timerInitStructure;
@@ -1298,6 +1319,17 @@ void InitializeTimer(uint32_t PWM_PERIOD, uint32_t PWM_PERIOD_5V)
     TIM_TimeBaseInit(TIM2, &timerInitStructure);
     TIM_Cmd(TIM2, ENABLE);  
     
+    //Timer for 3V6
+ /*   RCC_APB1PeriphClockCmd(RCC_APB1Periph_TIM13, ENABLE);
+
+    timerInitStructure.TIM_Prescaler = 0;
+    timerInitStructure.TIM_CounterMode = TIM_CounterMode_Up;
+    timerInitStructure.TIM_Period = PWM_PERIOD_3V6;
+    timerInitStructure.TIM_ClockDivision = TIM_CKD_DIV1;
+    timerInitStructure.TIM_RepetitionCounter = 0;
+    TIM_TimeBaseInit(TIM13, &timerInitStructure);
+    TIM_Cmd(TIM13, ENABLE);  
+ */   
  /************ TIMER3 skirtas taravimui ir kalibravimui*********/
        /* Cycle timer interrupt */
     NVIC_InitStructure.NVIC_IRQChannel = TIM3_IRQn;
@@ -1322,6 +1354,7 @@ void InitializeTimer(uint32_t PWM_PERIOD, uint32_t PWM_PERIOD_5V)
 
 void InitializePWMChannel()
 {
+  //PWM for Vref 
     TIM_OCInitTypeDef outputChannelInit = {4,};
     outputChannelInit.TIM_OCMode = TIM_OCMode_PWM1;
     outputChannelInit.TIM_Pulse = 0;
@@ -1344,6 +1377,18 @@ void InitializePWMChannel()
     TIM_OC1PreloadConfig(TIM2, TIM_OCPreload_Enable);
  
     GPIO_PinAFConfig(GPIOA, GPIO_PinSource15, GPIO_AF_1);    
+    
+    //PWM for 3.6V control
+    TIM_OCInitTypeDef outputChannelInit3 = {2,};
+    outputChannelInit3.TIM_OCMode = TIM_OCMode_PWM1;
+    outputChannelInit3.TIM_Pulse = 0;
+    outputChannelInit3.TIM_OutputState = TIM_OutputState_Enable;
+    outputChannelInit3.TIM_OCPolarity = TIM_OCPolarity_High;
+ 
+    TIM_OC2Init(TIM2, &outputChannelInit3);
+    TIM_OC2PreloadConfig(TIM2, TIM_OCPreload_Enable);
+ 
+    GPIO_PinAFConfig(GPIOB, GPIO_PinSource3, GPIO_AF_1);  
 }
 
 void TIM3_switch (uint8_t status){
@@ -1420,6 +1465,10 @@ void ChangePWM_5V_duty( uint16_t PULSE )
 TIM2->CCR1=PULSE;
 }
 
+void ChangePWM_3v6_duty( uint16_t PULSE )
+{
+TIM2->CCR2=PULSE;
+}
 
 /**
   * @brief  Inserts a delay time.
