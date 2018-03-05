@@ -2,8 +2,8 @@
   ******************************************************************************
   * @file    SDADC/SDADC_Voltmeter/main.c 
   * @author  Donatas
-  * @version V1.23.13
-  * @date    02-March-2018
+  * @version V1.23.14
+  * @date    05-March-2018
   * @brief   Main program body
   * Rx - PA2  TX - PA3, UART2 
   * SDADC PB2 
@@ -36,6 +36,7 @@
   * 2018-02-22 Pacio sensoriaus termokompensacija
   * 2018-02-26 Papildomas Timer3 kalibravimui
   * 2018-03-02 SAR PA1 ir PWM PB3 3.6V control     
+  * 2018-03-05 SAR PA0 ir PWM  3.6V control perdariau i PA1 (PB3 PWM po debug sustabdymo uzluzta).
 ******************************************************************************
   */
 
@@ -112,6 +113,8 @@ float sumatorius2 = 0;
 float integral=0;
 float integral2=0;
 float integral3=0;
+float integral4=0;
+
 
 float targetVoltagePWM=0;
 float targetVref_mazas=0;
@@ -127,8 +130,9 @@ float zeroForce_mV;
 
 /* Pagalbiniai variables */
 uint32_t kintamasis=0;
-float P_tu=2;
-float I_tu=0;
+float Target_tu=3580;
+float P_tu=10;
+float I_tu=10;
 uint8_t flag_calibruoti=0;
 float RxBuffer[11]={0xFFF,0xFFF,0xFFF,0xFFF,0xFFF,0xFFF,0xFFF,0xFFF,0xFFF,0xFFF,0xFFF};
 uint8_t calibravimo_rezult=0;
@@ -162,6 +166,7 @@ float Vrefpwm_thermo(float temp_deg, float Vrefpwm_target);
 void Post_office( float *buffer_float);
 float PI_controller(float value, float target, float Kp, float Ki);
 float PI_con_5V(float value, float target, float Kp, float Ki);
+float PI_con_3V6(float value, float target, float Kp, float Ki);
 uint16_t histereze_5V(float value, uint16_t current_PWM);
 uint8_t offset_calib( void );
 float PI_con_Vsensor(float value, float target, float Kp, float Ki);
@@ -208,8 +213,14 @@ int main(void)
     
   GPIO_init();
   USART2_Configuration();
+  
+  DBGMCU_APB1PeriphConfig(DBGMCU_TIM2_STOP,  ENABLE );
+
+  
   InitializeTimer(PWM_PERIOD, PWM_PERIOD_5V,PWM_PERIOD_3V6 );
   InitializePWMChannel();
+  
+  
   ADC_init();
   DMA_initSDADC();
  
@@ -271,7 +282,8 @@ int main(void)
       ChangePWM_5V_duty(PWM_PERIOD_5V-DUTY_5V);                  //____________DEMESIO cia reikia invertuoti
       DUTY=(uint16_t)PI_controller(VrefMv,Thermo_targetVpwm,3,10);   //30,0.2   0.6,0.1    10,20
       ChangePWM_duty( PWM_PERIOD - DUTY );
-      
+      DUTY_3V6= (uint16_t)PI_con_3V6(V_3v3_calculated, Target_tu, P_tu,I_tu); 
+//      DUTY_3V6=36650;      
       ChangePWM_3v6_duty(PWM_PERIOD_3V6- DUTY_3V6);
 
 /* Convert to Newton */      
@@ -446,6 +458,27 @@ float PI_con_5V(float value, float target, float Kp, float Ki)
     
   return output; 
 }
+float PI_con_3V6(float value, float target, float Kp, float Ki)
+{ 
+  float output=0;
+  float error=0;
+  
+  error=target-value;
+  if ( ((DUTY_3V6<PWM_PERIOD_3V6) && (DUTY_3V6>0)) && (Ki!=0) ){
+    integral4 = integral4 + (error)/500;} //reikia padauginti is iteration period______DEMESIO!!!!!!!!!!!!!!!!
+  output= (Kp*error+Ki*integral4);
+  
+    //apsauga nuo integral suoliu, RIBAS reikia parinkti pagal matavimo diapazona
+  if ((DUTY_3V6==0 || DUTY_3V6==PWM_PERIOD_3V6) && (error>50 || error<-50)  )
+      integral4=0;
+  
+  if( output > PWM_PERIOD_3V6 )
+      output = PWM_PERIOD_3V6;
+  if( output < 0 )
+       output = 0;
+    
+  return output; 
+}
 
 uint16_t histereze_5V(float value, uint16_t current_PWM) //pradinis variantas, dabar nenaudojama
 { 
@@ -569,8 +602,8 @@ void measureALL(void)
        ADC_3V6_divider=RegularConvData_Tab[1]; 
        
 /* 3.6V arba 3.3V maitinimo itampos iskaiciavimas is external 3Vref*/ 
-      fixed_step = 3000.45 /(SDADCData_Tab[1]+32768); // priimu kad External 3Vref cia nesikeicia (veliau ji kompensuosiu)
-      V_3v3_calculated=(fixed_step*65535)+105.3; //1.037
+      fixed_step = 2999.1 /(SDADCData_Tab[1]+32768); // priimu kad External 3Vref cia nesikeicia (veliau ji kompensuosiu)
+      V_3v3_calculated=(fixed_step*65535)+115.1;     // (1)1.037  (2) 121.3 (3) 115.1
       AVG_V_3v3_calculated = V_3v3_calculated + (V_3v3_calculated - AVG_V_3v3_calculated)/1000;     
        
 /* Temperaturos iskaiciavimas */      
@@ -588,8 +621,9 @@ void measureALL(void)
       Vdd5V =    ((InjectedConvData3Ch7 + 32768) * step_mv)/0.6175; //su Gwinstek matuojant 0.6175 atitnka 5V, kai varzos 2.4K ir 3.9K
       Vdd5V_AVG = Vdd5V_AVG + (Vdd5V - Vdd5V_AVG)/200;
 /* Compute 3.6V supply */ 
-      vcc_3V6 =    ADC_3V6_divider *0.8; //su Gwinstek matuojant 0.6175 atitnka 5V, kai varzos 2.4K ir 3.9K
+/*      vcc_3V6 =    ADC_3V6_divider *0.8; //su Gwinstek matuojant 0.6175 atitnka 5V, kai varzos 2.4K ir 3.9K
       AVG_vcc_3V6 = AVG_vcc_3V6 + (vcc_3V6 - AVG_vcc_3V6)/200;
+*/      
 /* vidurkinimas Vsensor*/
        if (kaupimo_index1<10){     //kaupiame 10 reiksmiu bufferi
           Voltage_buffer[kaupimo_index1]=VsensorMv;
@@ -1249,8 +1283,8 @@ void GPIO_init(){
   GPIO_InitTypeDef GPIO_InitStructure;
   
   RCC_AHBPeriphClockCmd(RCC_AHBPeriph_GPIOA, ENABLE);
-      
-  GPIO_InitStructure.GPIO_Pin = GPIO_Pin_4; /*Configure RS485*/
+ /*Configure RS485*/     
+  GPIO_InitStructure.GPIO_Pin = GPIO_Pin_4; 
   GPIO_InitStructure.GPIO_Speed = GPIO_Speed_Level_2;
   GPIO_InitStructure.GPIO_Mode = GPIO_Mode_OUT;
   GPIO_InitStructure.GPIO_OType = GPIO_OType_PP;
@@ -1264,34 +1298,44 @@ void GPIO_init(){
    GPIO_InitStructure.GPIO_Mode = GPIO_Mode_AF;
    GPIO_InitStructure.GPIO_Speed = GPIO_Speed_50MHz;
    GPIO_Init(GPIOF, &GPIO_InitStructure);
+   
   //PWM pin 5V
    RCC_AHBPeriphClockCmd(RCC_AHBPeriph_GPIOA, ENABLE);
- 
    GPIO_InitStructure.GPIO_Pin = GPIO_Pin_15;
+   GPIO_InitStructure.GPIO_Mode = GPIO_Mode_AF;
+   GPIO_InitStructure.GPIO_Speed = GPIO_Speed_50MHz;
+   GPIO_Init(GPIOA, &GPIO_InitStructure);  
+   
+  //PWM pin 3.6V
+   RCC_AHBPeriphClockCmd(RCC_AHBPeriph_GPIOB, ENABLE);
+   GPIO_InitStructure.GPIO_Pin = GPIO_Pin_3;
+   GPIO_InitStructure.GPIO_Mode = GPIO_Mode_AF;
+   GPIO_InitStructure.GPIO_Speed = GPIO_Speed_50MHz;
+   GPIO_Init(GPIOB, &GPIO_InitStructure);   
+   
+   //PWM pin 3.6V 2 dublis
+   RCC_AHBPeriphClockCmd(RCC_AHBPeriph_GPIOA, ENABLE);
+   GPIO_InitStructure.GPIO_Pin = GPIO_Pin_1;
    GPIO_InitStructure.GPIO_Mode = GPIO_Mode_AF;
    GPIO_InitStructure.GPIO_Speed = GPIO_Speed_50MHz;
    GPIO_Init(GPIOA, &GPIO_InitStructure);   
    
   //Multiplexer pin
    RCC_AHBPeriphClockCmd(RCC_AHBPeriph_GPIOB, ENABLE);
-
   GPIO_InitStructure.GPIO_Pin = GPIO_Pin_4; 
   GPIO_InitStructure.GPIO_Speed = GPIO_Speed_Level_2;
   GPIO_InitStructure.GPIO_Mode = GPIO_Mode_OUT;
   GPIO_InitStructure.GPIO_OType = GPIO_OType_PP;
   GPIO_InitStructure.GPIO_PuPd = GPIO_PuPd_NOPULL;
   GPIO_Init(GPIOB, &GPIO_InitStructure);
+  
     //SAR ADC pins PA0 and PA1
    RCC_AHBPeriphClockCmd(RCC_AHBPeriph_GPIOA, ENABLE);
-   GPIO_InitStructure.GPIO_Pin = GPIO_Pin_0 | GPIO_Pin_1;
+   GPIO_InitStructure.GPIO_Pin = GPIO_Pin_0;
    GPIO_InitStructure.GPIO_Mode = GPIO_Mode_AN;
    GPIO_InitStructure.GPIO_PuPd = GPIO_PuPd_NOPULL;
    GPIO_Init(GPIOA, &GPIO_InitStructure);
-    //PWM 3.6V control PB3
-   RCC_AHBPeriphClockCmd(RCC_AHBPeriph_GPIOB, ENABLE);
-   GPIO_InitStructure.GPIO_Pin = GPIO_Pin_3;
-   GPIO_InitStructure.GPIO_PuPd = GPIO_PuPd_NOPULL;
-   GPIO_Init(GPIOB, &GPIO_InitStructure);
+  
   }
 
 void InitializeTimer(uint32_t PWM_PERIOD, uint32_t PWM_PERIOD_5V, uint32_t PWM_PERIOD_3V6 )
@@ -1308,7 +1352,7 @@ void InitializeTimer(uint32_t PWM_PERIOD, uint32_t PWM_PERIOD_5V, uint32_t PWM_P
     TIM_TimeBaseInit(TIM4, &timerInitStructure);
     TIM_Cmd(TIM4, ENABLE);
     
-    //Timer for 5V
+    //Timer for 5V and for 3.6V control
     RCC_APB1PeriphClockCmd(RCC_APB1Periph_TIM2, ENABLE);
 
     timerInitStructure.TIM_Prescaler = 0;
@@ -1319,12 +1363,12 @@ void InitializeTimer(uint32_t PWM_PERIOD, uint32_t PWM_PERIOD_5V, uint32_t PWM_P
     TIM_TimeBaseInit(TIM2, &timerInitStructure);
     TIM_Cmd(TIM2, ENABLE);  
     
-    //Timer for 3V6
- /*   RCC_APB1PeriphClockCmd(RCC_APB1Periph_TIM13, ENABLE);
+    //Timer for 3.6V control
+/*    RCC_APB1PeriphClockCmd(RCC_APB1Periph_TIM13, ENABLE);
 
     timerInitStructure.TIM_Prescaler = 0;
     timerInitStructure.TIM_CounterMode = TIM_CounterMode_Up;
-    timerInitStructure.TIM_Period = PWM_PERIOD_3V6;
+    timerInitStructure.TIM_Period = PWM_PERIOD_5V;
     timerInitStructure.TIM_ClockDivision = TIM_CKD_DIV1;
     timerInitStructure.TIM_RepetitionCounter = 0;
     TIM_TimeBaseInit(TIM13, &timerInitStructure);
@@ -1384,11 +1428,25 @@ void InitializePWMChannel()
     outputChannelInit3.TIM_Pulse = 0;
     outputChannelInit3.TIM_OutputState = TIM_OutputState_Enable;
     outputChannelInit3.TIM_OCPolarity = TIM_OCPolarity_High;
- 
+    
     TIM_OC2Init(TIM2, &outputChannelInit3);
     TIM_OC2PreloadConfig(TIM2, TIM_OCPreload_Enable);
+    
+//    GPIO_PinAFConfig(GPIOB, GPIO_PinSource3, GPIO_AF_1);  
+    GPIO_PinAFConfig(GPIOA, GPIO_PinSource1, GPIO_AF_1); 
+    
+/*        //PWM for 3.6V control TIM13
+    TIM_OCInitTypeDef outputChannelInit3 = {1,};
+    outputChannelInit3.TIM_OCMode = TIM_OCMode_PWM1;
+    outputChannelInit3.TIM_Pulse = 0;
+    outputChannelInit3.TIM_OutputState = TIM_OutputState_Enable;
+    outputChannelInit3.TIM_OCPolarity = TIM_OCPolarity_High;
+    
+    TIM_OC1Init(TIM13, &outputChannelInit3);
+    TIM_OC1PreloadConfig(TIM13, TIM_OCPreload_Enable);
  
-    GPIO_PinAFConfig(GPIOB, GPIO_PinSource3, GPIO_AF_1);  
+    GPIO_PinAFConfig(GPIOB, GPIO_PinSource3, GPIO_AF_2);  
+    */
 }
 
 void TIM3_switch (uint8_t status){
@@ -1468,6 +1526,7 @@ TIM2->CCR1=PULSE;
 void ChangePWM_3v6_duty( uint16_t PULSE )
 {
 TIM2->CCR2=PULSE;
+//  TIM13->CCR1=PULSE;
 }
 
 /**
