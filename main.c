@@ -207,7 +207,7 @@ void TIM3_IRQHandler(void) //taravimo ir kalibravimo timer
   {
     TIM_ClearITPendingBit(TIM3, TIM_IT_Update);
     flag_TIM3=1;
-    TIM3_switch(0);
+    TIM3_switch(0); // isjungia Timer3
   }   
  }
 
@@ -217,7 +217,6 @@ void TIM4_IRQHandler(void) //TIMER4 relaod trigger ,kas 0,7ms
   {
     TIM_ClearITPendingBit(TIM4, TIM_IT_Update);
     flag_TIM4=1;
-    
       /*  debug dalis skirta indikacijai*/
 /*    if (flag_toogle==1){
       GPIO_SetBits(GPIOF,  GPIO_Pin_7);
@@ -417,7 +416,7 @@ float PI_controller(float value, float target, float Kp, float Ki)
   error=target-value;
   errorDebug=error;
   if ( ((DUTY<PWM_PERIOD) && (DUTY>0)) && (Ki!=0) ){ //anti windup
-    integral = integral + (error)/(time_integral*10);}       
+    integral = integral + (error)/(time_integral*10);}  // cia Integral time didesnis     
   output= (Kp*error+Ki*integral);
   
       //apsauga nuo integral suoliu, RIBAS reikia parinkti pagal matavimo diapazona
@@ -1369,7 +1368,7 @@ void GPIO_init(){
   
   }
 
-void InitializeTimer(uint32_t PWM_PERIOD, uint32_t PWM_PERIOD_5V, uint32_t PWM_PERIOD_3V6 )
+void InitializeTimer(uint32_t PERIOD, uint32_t PERIOD_5V, uint32_t PERIOD_3V6 )
 {          
     // Timer for Vref pwm
     // Cycle timer interrupt 
@@ -1397,7 +1396,7 @@ void InitializeTimer(uint32_t PWM_PERIOD, uint32_t PWM_PERIOD_5V, uint32_t PWM_P
 
     timerInitStructure.TIM_Prescaler = 0;
     timerInitStructure.TIM_CounterMode = TIM_CounterMode_Up;
-    timerInitStructure.TIM_Period = PWM_PERIOD_5V_3V6;
+    timerInitStructure.TIM_Period = PERIOD_5V; //Ir 5V ir 3,6V periodas toks pat 
     timerInitStructure.TIM_ClockDivision = TIM_CKD_DIV1;
     timerInitStructure.TIM_RepetitionCounter = 0;
     TIM_TimeBaseInit(TIM2, &timerInitStructure);
