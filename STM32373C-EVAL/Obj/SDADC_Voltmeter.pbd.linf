@@ -1,5 +1,7 @@
 ﻿C:\Users\zaibas\Documents\IAR Embedded Workbench\STM32F37x_DSP_StdPeriph_Lib\Project\StdPeriph_Examples\SDADC\SDADC_Voltmeter\STM32373C-EVAL\Obj\SDADC_Voltmeter.pbd
-C:\Users\zaibas\Documents\IAR Embedded Workbench\STM32F37x_DSP_StdPeriph_Lib\Project\StdPeriph_Examples\SDADC\SDADC_Voltmeter\STM32373C-EVAL\Obj\system_stm32f37x.pbi
+C:\Users\zaibas\Documents\IAR Embedded Workbench\STM32F37x_DSP_StdPeriph_Lib\Project\StdPeriph_Examples\SDADC\SDADC_Voltmeter\STM32373C-EVAL\Obj\main.pbi
+C:\Users\zaibas\Documents\IAR Embedded Workbench\STM32F37x_DSP_StdPeriph_Lib\Project\StdPeriph_Examples\SDADC\SDADC_Voltmeter\STM32373C-EVAL\Obj\stm32373c_eval.pbi
+C:\Users\zaibas\Documents\IAR Embedded Workbench\STM32F37x_DSP_StdPeriph_Lib\Project\StdPeriph_Examples\SDADC\SDADC_Voltmeter\STM32373C-EVAL\Obj\stm32373c_eval_lcd.pbi
 C:\Users\zaibas\Documents\IAR Embedded Workbench\STM32F37x_DSP_StdPeriph_Lib\Project\StdPeriph_Examples\SDADC\SDADC_Voltmeter\STM32373C-EVAL\Obj\stm32f37x_adc.pbi
 C:\Users\zaibas\Documents\IAR Embedded Workbench\STM32F37x_DSP_StdPeriph_Lib\Project\StdPeriph_Examples\SDADC\SDADC_Voltmeter\STM32373C-EVAL\Obj\stm32f37x_can.pbi
 C:\Users\zaibas\Documents\IAR Embedded Workbench\STM32F37x_DSP_StdPeriph_Lib\Project\StdPeriph_Examples\SDADC\SDADC_Voltmeter\STM32373C-EVAL\Obj\stm32f37x_cec.pbi
@@ -12,6 +14,7 @@ C:\Users\zaibas\Documents\IAR Embedded Workbench\STM32F37x_DSP_StdPeriph_Lib\Pro
 C:\Users\zaibas\Documents\IAR Embedded Workbench\STM32F37x_DSP_StdPeriph_Lib\Project\StdPeriph_Examples\SDADC\SDADC_Voltmeter\STM32373C-EVAL\Obj\stm32f37x_flash.pbi
 C:\Users\zaibas\Documents\IAR Embedded Workbench\STM32F37x_DSP_StdPeriph_Lib\Project\StdPeriph_Examples\SDADC\SDADC_Voltmeter\STM32373C-EVAL\Obj\stm32f37x_gpio.pbi
 C:\Users\zaibas\Documents\IAR Embedded Workbench\STM32F37x_DSP_StdPeriph_Lib\Project\StdPeriph_Examples\SDADC\SDADC_Voltmeter\STM32373C-EVAL\Obj\stm32f37x_i2c.pbi
+C:\Users\zaibas\Documents\IAR Embedded Workbench\STM32F37x_DSP_StdPeriph_Lib\Project\StdPeriph_Examples\SDADC\SDADC_Voltmeter\STM32373C-EVAL\Obj\stm32f37x_it.pbi
 C:\Users\zaibas\Documents\IAR Embedded Workbench\STM32F37x_DSP_StdPeriph_Lib\Project\StdPeriph_Examples\SDADC\SDADC_Voltmeter\STM32373C-EVAL\Obj\stm32f37x_iwdg.pbi
 C:\Users\zaibas\Documents\IAR Embedded Workbench\STM32F37x_DSP_StdPeriph_Lib\Project\StdPeriph_Examples\SDADC\SDADC_Voltmeter\STM32373C-EVAL\Obj\stm32f37x_misc.pbi
 C:\Users\zaibas\Documents\IAR Embedded Workbench\STM32F37x_DSP_StdPeriph_Lib\Project\StdPeriph_Examples\SDADC\SDADC_Voltmeter\STM32373C-EVAL\Obj\stm32f37x_pwr.pbi
@@ -23,7 +26,4 @@ C:\Users\zaibas\Documents\IAR Embedded Workbench\STM32F37x_DSP_StdPeriph_Lib\Pro
 C:\Users\zaibas\Documents\IAR Embedded Workbench\STM32F37x_DSP_StdPeriph_Lib\Project\StdPeriph_Examples\SDADC\SDADC_Voltmeter\STM32373C-EVAL\Obj\stm32f37x_tim.pbi
 C:\Users\zaibas\Documents\IAR Embedded Workbench\STM32F37x_DSP_StdPeriph_Lib\Project\StdPeriph_Examples\SDADC\SDADC_Voltmeter\STM32373C-EVAL\Obj\stm32f37x_usart.pbi
 C:\Users\zaibas\Documents\IAR Embedded Workbench\STM32F37x_DSP_StdPeriph_Lib\Project\StdPeriph_Examples\SDADC\SDADC_Voltmeter\STM32373C-EVAL\Obj\stm32f37x_wwdg.pbi
-C:\Users\zaibas\Documents\IAR Embedded Workbench\STM32F37x_DSP_StdPeriph_Lib\Project\StdPeriph_Examples\SDADC\SDADC_Voltmeter\STM32373C-EVAL\Obj\stm32373c_eval.pbi
-C:\Users\zaibas\Documents\IAR Embedded Workbench\STM32F37x_DSP_StdPeriph_Lib\Project\StdPeriph_Examples\SDADC\SDADC_Voltmeter\STM32373C-EVAL\Obj\stm32373c_eval_lcd.pbi
-C:\Users\zaibas\Documents\IAR Embedded Workbench\STM32F37x_DSP_StdPeriph_Lib\Project\StdPeriph_Examples\SDADC\SDADC_Voltmeter\STM32373C-EVAL\Obj\main.pbi
-C:\Users\zaibas\Documents\IAR Embedded Workbench\STM32F37x_DSP_StdPeriph_Lib\Project\StdPeriph_Examples\SDADC\SDADC_Voltmeter\STM32373C-EVAL\Obj\stm32f37x_it.pbi
+C:\Users\zaibas\Documents\IAR Embedded Workbench\STM32F37x_DSP_StdPeriph_Lib\Project\StdPeriph_Examples\SDADC\SDADC_Voltmeter\STM32373C-EVAL\Obj\system_stm32f37x.pbi

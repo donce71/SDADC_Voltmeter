@@ -2,8 +2,8 @@
   ******************************************************************************
   * @file    SDADC/SDADC_Voltmeter/main.c 
   * @author  Donatas
-  * @version V1.23.15
-  * @date    06-March-2018
+  * @version V1.23.16
+  * @date    07-March-2018
   * @brief   Main program body
   * Rx - PA2  TX - PA3, UART2 
   * SDADC PB2 
@@ -38,6 +38,7 @@
   * 2018-03-02 SAR PA1 ir PWM PB3 3.6V control     
   * 2018-03-05 SAR PA0 ir PWM  3.6V control perdariau i PA1 (PB3 PWM po debug sustabdymo uzluzta).
   * 2018-03-06 TIMER5 skirtas feedback trigerinimui
+  * 2018-03-07 TIMER5 istryniau, ir naudoju TIM4 kad kad trigerintu kada reik DUTY pakeisti. 
 ******************************************************************************
   */
 
@@ -64,11 +65,12 @@ int16_t InjectedConvData3Ch7 = 0;
 
 __IO uint32_t TimingDelay = 0;
 uint32_t PWM_PERIOD=50000;
-uint32_t PWM_PERIOD_5V=50000;
-uint32_t PWM_PERIOD_3V6=50000;
+uint32_t PWM_PERIOD_5V_3V6          =1000;
+uint32_t PWM_PERIOD_5V              =1000;
+uint32_t PWM_PERIOD_3V6             =1000;
 uint32_t Period_debug=100;
 uint16_t DUTY=9424;
-uint16_t DUTY_5V=16000;
+uint16_t DUTY_5V=0;
 uint16_t DUTY_3V6=0;
 __IO uint16_t RegularConvData_Tab[2];
 __IO int16_t SDADCData_Tab[3];
@@ -97,7 +99,7 @@ float fixed_step=0;
 float Vdd5V= 5000;
 float Vdd5V_AVG= 5000;
 float Vcc_calculated=0;
-float AVG_Vcc_calculated=3300;
+float AVG_Vcc_calculated=3500;
 float Thermo_targetVpwm=0;
 int16_t Newton=0;
 int16_t Prior_Newton=0;
@@ -116,7 +118,7 @@ float integral=0;
 float integral2=0;
 float integral3=0;
 float integral4=0;
-
+float time_integral=10;
 
 float targetVoltagePWM=0;
 float targetVref_mazas=0;
@@ -133,7 +135,7 @@ float zeroForce_mV;
 /* Pagalbiniai variables */
 uint32_t kintamasis=0;
 float Target_tu=3580;
-float P_tu=10;
+float P_tu=3;
 float I_tu=10;
 uint8_t flag_calibruoti=0;
 float RxBuffer[11]={0xFFF,0xFFF,0xFFF,0xFFF,0xFFF,0xFFF,0xFFF,0xFFF,0xFFF,0xFFF,0xFFF};
@@ -141,7 +143,8 @@ uint8_t calibravimo_rezult=0;
 uint8_t flag_tare=0;
 uint8_t flag_koef=0;
 uint8_t flag_TIM3=0;
-uint8_t flag_TIM5=0;
+uint8_t flag_TIM4=0;
+uint8_t flag_toogle=0;
 float naujas_Newton_koef=0;
 uint32_t counter=0;
 float errorDebug=0;
@@ -195,7 +198,7 @@ void ChangePWM_5V_duty( uint16_t PULSE );
 void ChangePWM_3v6_duty( uint16_t PULSE );
 void TIM3_IRQHandler(void) ;
 void TIM3_switch (uint8_t status);
-void TIM5_IRQHandler(void) ;
+void TIM4_IRQHandler(void) ;
 
 
 void TIM3_IRQHandler(void) //taravimo ir kalibravimo timer
@@ -208,22 +211,21 @@ void TIM3_IRQHandler(void) //taravimo ir kalibravimo timer
   }   
  }
 
-void TIM5_IRQHandler(void) //Feedback trigerinmo timer
+void TIM4_IRQHandler(void) //TIMER4 relaod trigger ,kas 0,7ms
 {  
-  if (TIM_GetITStatus(TIM5, TIM_IT_Update) != RESET)
+  if (TIM_GetITStatus(TIM4, TIM_IT_Update) != RESET)
   {
-    TIM_ClearITPendingBit(TIM5, TIM_IT_Update);
-        
-    flag_TIM5=1;
+    TIM_ClearITPendingBit(TIM4, TIM_IT_Update);
+    flag_TIM4=1;
     
-  /*  debug dalis skirta indikacijai*/
-  /*  if (flag_TIM5==1){
+      /*  debug dalis skirta indikacijai*/
+/*    if (flag_toogle==1){
       GPIO_SetBits(GPIOF,  GPIO_Pin_7);
-      flag_TIM5=0;}
+      flag_toogle=0;}
     else{
       GPIO_ResetBits(GPIOF,  GPIO_Pin_7);
-      flag_TIM5=1;}
-  */  
+      flag_toogle=1;}
+*/    
   }   
  }
 
@@ -242,9 +244,6 @@ int main(void)
   ADC_init();
   DMA_initSDADC();
  
-  vref_internal_calibrated = *((uint16_t *)(VREF_INTERNAL_BASE_ADDRESS)); //ADC reiksme kai Vdd=3.3V
-  Vref_internal_itampa= (vref_internal_calibrated)*3300/ 4095; //Vidinio Vref itampa
-  Vref_internal_itampa= 1229;                // Kalibruojant su PICOLOG
   targetVoltagePWM = sensor_init();
 
    //nuskaitymas is flash 
@@ -295,19 +294,19 @@ int main(void)
       measureALL();
       Thermo_targetVpwm=Vrefpwm_thermo( Tempe, targetVoltagePWM);
                   
-/* Feedback control*/
-      if ( flag_TIM5==1){
-        DUTY_5V = (uint16_t)PI_con_5V(Vdd5V, Vdd5V_target, 10,10);
-        DUTY=(uint16_t)PI_controller(VrefMv,Thermo_targetVpwm,3,10);   //30,0.2   0.6,0.1    10,20
-        DUTY_3V6= (uint16_t)PI_con_3V6(Vcc_calculated, Target_tu, 5,3);  // (1)3580, 5,3
-        /*TIM2 and TIM4 reset couter registers */
-        TIM2->CNT = 0;
-        TIM4->CNT = 0;
-        ChangePWM_duty( PWM_PERIOD - DUTY );
-        ChangePWM_5V_duty(PWM_PERIOD_5V-DUTY_5V);                  //____________DEMESIO cia reikia invertuoti
-        ChangePWM_3v6_duty(PWM_PERIOD_3V6- DUTY_3V6);
-        flag_TIM5=0;
-        TIM5->ARR=Period_debug; //KEICIA KAIP DAZNAI YRA ISKVIECIAMAS TIM5 IRQ
+/* Feedback control triggered by Tim5*/
+      if ( flag_TIM4==1){
+          /*Calculate PWM new DUTY*/
+          DUTY_5V = (uint16_t)PI_con_5V(Vdd5V, Vdd5V_target, 10,10);
+          DUTY_3V6= (uint16_t)PI_con_3V6(Vcc_calculated, 3580, 5,10);  // (1)3580, 5,3
+          DUTY=(uint16_t)PI_controller(AVG_VrefMv,Thermo_targetVpwm,3,10);   //30,0.2   0.6,0.1    10,20   3,10 
+
+          /*Pakeicia PWM DUTY*/
+          ChangePWM_duty( PWM_PERIOD - DUTY );
+          ChangePWM_5V_duty(PWM_PERIOD_5V-DUTY_5V);                  //____________DEMESIO cia reikia invertuoti
+          ChangePWM_3v6_duty(PWM_PERIOD_3V6- DUTY_3V6);
+          
+          flag_TIM4=0;       
       }
 
 /* Convert to Newton */      
@@ -416,12 +415,13 @@ float PI_controller(float value, float target, float Kp, float Ki)
   float error=0;
 
   error=target-value;
+  errorDebug=error;
   if ( ((DUTY<PWM_PERIOD) && (DUTY>0)) && (Ki!=0) ){ //anti windup
-    integral = integral + (error)/1000;}       
+    integral = integral + (error)/(time_integral*10);}       
   output= (Kp*error+Ki*integral);
   
       //apsauga nuo integral suoliu, RIBAS reikia parinkti pagal matavimo diapazona
-  if ((DUTY==0 || DUTY==PWM_PERIOD) && (error>1500 || error<-1500)  )
+  if ((DUTY==0 || DUTY==PWM_PERIOD) && (error>2000 || error<-2000)  )
       integral=0;
   
   if( output > PWM_PERIOD )
@@ -439,7 +439,7 @@ float PI_con_Vsensor(float value, float target, float Kp, float Ki)
 
   error=target-value;
   if ( ((DUTY<PWM_PERIOD) && (DUTY>0)) && (Ki!=0) ){
-    integral3 = integral3 + (error)/10;}       
+    integral3 = integral3 + (error)/time_integral;}       
   output= (Kp*error+Ki*integral3);
   
       //apsauga nuo integral suoliu, RIBAS reikia parinkti pagal matavimo diapazona
@@ -461,11 +461,11 @@ float PI_con_5V(float value, float target, float Kp, float Ki)
   
   error=target-value;
   if ( ((DUTY_5V<PWM_PERIOD_5V) && (DUTY_5V>0)) && (Ki!=0) ){
-    integral2 = integral2 + (error)/10;} //reikia padauginti is iteration period______DEMESIO!!!!!!!!!!!!!!!!
+    integral2 = integral2 + (error)/time_integral;} //reikia padauginti is iteration period______DEMESIO!!!!!!!!!!!!!!!!
   output= (Kp*error+Ki*integral2);
   
     //apsauga nuo integral suoliu, RIBAS reikia parinkti pagal matavimo diapazona
-  if ((DUTY_5V==0 || DUTY_5V==PWM_PERIOD_5V) && (error>50 || error<-50)  )
+  if ((DUTY_5V==0 || DUTY_5V==PWM_PERIOD_5V) && (error>500 || error<-500)  )
       integral2=0;
   
   if( output > PWM_PERIOD_5V )
@@ -481,13 +481,12 @@ float PI_con_3V6(float value, float target, float Kp, float Ki)
   float error=0;
   
   error=target-value;
-  errorDebug=error;
   if ( ((DUTY_3V6<PWM_PERIOD_3V6) && (DUTY_3V6>0)) && (Ki!=0) ){
-    integral4 = integral4 + (error)/10;} //reikia padauginti is iteration period______DEMESIO!!!!!!!!!!!!!!!!
+    integral4 = integral4 + (error)/time_integral;} //reikia padauginti is iteration period______DEMESIO!!!!!!!!!!!!!!!!
   output= (Kp*error+Ki*integral4);
   
     //apsauga nuo integral suoliu, RIBAS reikia parinkti pagal matavimo diapazona
-  if ((DUTY_3V6==0 || DUTY_3V6==PWM_PERIOD_3V6) && (error>5 || error<-5)  )
+  if ((DUTY_3V6==0 || DUTY_3V6==PWM_PERIOD_3V6) && (error>2000 || error<-2000)  )
       integral4=0;
   
   if( output > PWM_PERIOD_3V6 )
@@ -656,7 +655,15 @@ void measureALL(void)
         }
        
 /* vidurkinimas Vref*/
-       if (kaupimo_index2<10){     //kaupiame 10 reiksmiu bufferi
+ /*    if (kaupimo_index2<10){     //kaupiame 10 reiksmiu bufferi
+        Voltage_buffer2[kaupimo_index2]=VrefMv;
+        kaupimo_index2++;
+        }
+     else{                     // apskaiciuoja buferio vidurki is 8 reiksmiu (be min ir max)
+          AVG_VrefMv=Get_8of10AVG(Voltage_buffer2);
+          kaupimo_index2=0;
+        } 
+ */      if (kaupimo_index2<10){     //kaupiame 10 reiksmiu bufferi
           Voltage_buffer2[kaupimo_index2]=VrefMv;
           kaupimo_index2++;
           }
@@ -671,6 +678,8 @@ void measureALL(void)
               sumavimo_index2=0;
              }
         } 
+
+       
 }
 
 void Post_office( float *buffer_float){
@@ -1363,6 +1372,13 @@ void GPIO_init(){
 void InitializeTimer(uint32_t PWM_PERIOD, uint32_t PWM_PERIOD_5V, uint32_t PWM_PERIOD_3V6 )
 {          
     // Timer for Vref pwm
+    // Cycle timer interrupt 
+    NVIC_InitStructure.NVIC_IRQChannel = TIM4_IRQn;
+    NVIC_InitStructure.NVIC_IRQChannelPreemptionPriority = 1;
+    NVIC_InitStructure.NVIC_IRQChannelSubPriority=1;
+    NVIC_InitStructure.NVIC_IRQChannelCmd = ENABLE;
+    NVIC_Init(&NVIC_InitStructure);
+
     RCC_APB1PeriphClockCmd(RCC_APB1Periph_TIM4, ENABLE);
 
     TIM_TimeBaseInitTypeDef timerInitStructure;
@@ -1372,6 +1388,8 @@ void InitializeTimer(uint32_t PWM_PERIOD, uint32_t PWM_PERIOD_5V, uint32_t PWM_P
     timerInitStructure.TIM_ClockDivision = TIM_CKD_DIV1;
     timerInitStructure.TIM_RepetitionCounter = 0;
     TIM_TimeBaseInit(TIM4, &timerInitStructure);
+    
+    TIM_ITConfig(TIM4, TIM_IT_Update, ENABLE);
     TIM_Cmd(TIM4, ENABLE);
     
     //Timer for 5V and for 3.6V control
@@ -1379,7 +1397,7 @@ void InitializeTimer(uint32_t PWM_PERIOD, uint32_t PWM_PERIOD_5V, uint32_t PWM_P
 
     timerInitStructure.TIM_Prescaler = 0;
     timerInitStructure.TIM_CounterMode = TIM_CounterMode_Up;
-    timerInitStructure.TIM_Period = PWM_PERIOD_5V;
+    timerInitStructure.TIM_Period = PWM_PERIOD_5V_3V6;
     timerInitStructure.TIM_ClockDivision = TIM_CKD_DIV1;
     timerInitStructure.TIM_RepetitionCounter = 0;
     TIM_TimeBaseInit(TIM2, &timerInitStructure);
@@ -1388,8 +1406,8 @@ void InitializeTimer(uint32_t PWM_PERIOD, uint32_t PWM_PERIOD_5V, uint32_t PWM_P
  /************ TIMER3 skirtas taravimui ir kalibravimui*********/
        /* Cycle timer interrupt */
     NVIC_InitStructure.NVIC_IRQChannel = TIM3_IRQn;
-    NVIC_InitStructure.NVIC_IRQChannelPreemptionPriority = 1;
-    NVIC_InitStructure.NVIC_IRQChannelSubPriority=1;
+    NVIC_InitStructure.NVIC_IRQChannelPreemptionPriority = 2;
+    NVIC_InitStructure.NVIC_IRQChannelSubPriority=2;
     NVIC_InitStructure.NVIC_IRQChannelCmd = ENABLE;
     NVIC_Init(&NVIC_InitStructure);
 
@@ -1405,27 +1423,6 @@ void InitializeTimer(uint32_t PWM_PERIOD, uint32_t PWM_PERIOD_5V, uint32_t PWM_P
     TIM_TimeBaseInit(TIM3, &timerInitStructure);
 //    TIM3_switch(1);
     
-     /************ TIMER5 skirtas feedback trigger*********/
-       /* Cycle timer interrupt */
-    NVIC_InitStructure.NVIC_IRQChannel = TIM5_IRQn;
-    NVIC_InitStructure.NVIC_IRQChannelPreemptionPriority = 2;
-    NVIC_InitStructure.NVIC_IRQChannelSubPriority=1;
-    NVIC_InitStructure.NVIC_IRQChannelCmd = ENABLE;
-    NVIC_Init(&NVIC_InitStructure);
-
-    /* timer controlling step frequency */
-    /* APB1 72MHz */
-    RCC_APB1PeriphClockCmd(RCC_APB1Periph_TIM5, ENABLE);
-
-    timerInitStructure.TIM_Prescaler = 720-1;                //100kHz
-    timerInitStructure.TIM_CounterMode = TIM_CounterMode_Up; 
-    timerInitStructure.TIM_Period = 100;                    // Periodos 1/100kHz *100 = 1ms
-    timerInitStructure.TIM_ClockDivision = TIM_CKD_DIV1;
-    TIM_TimeBaseInit(TIM5, &timerInitStructure);
-    
-    TIM_ClearITPendingBit(TIM5, TIM_IT_Update);
-    TIM_ITConfig(TIM5, TIM_IT_Update, ENABLE);
-    TIM_Cmd(TIM5, ENABLE);
 }
 
 void InitializePWMChannel()
