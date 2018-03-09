@@ -2,8 +2,8 @@
   ******************************************************************************
   * @file    SDADC/SDADC_Voltmeter/main.c 
   * @author  Donatas
-  * @version V1.23.16
-  * @date    07-March-2018
+  * @version V1.23.19
+  * @date    09-March-2018
   * @brief   Main program body
   * Rx - PA2  TX - PA3, UART2 
   * SDADC PB2 
@@ -39,6 +39,7 @@
   * 2018-03-05 SAR PA0 ir PWM  3.6V control perdariau i PA1 (PB3 PWM po debug sustabdymo uzluzta).
   * 2018-03-06 TIMER5 skirtas feedback trigerinimui
   * 2018-03-07 TIMER5 istryniau, ir naudoju TIM4 kad kad trigerintu kada reik DUTY pakeisti. 
+  * 2018-03-09 TIMER5 naudoju error detection, 2s intervalas patvirtinti kad itampa bloga
 ******************************************************************************
   */
 
@@ -65,14 +66,14 @@ int16_t InjectedConvData3Ch7 = 0;
 
 __IO uint32_t TimingDelay = 0;
 uint32_t PWM_PERIOD=50000;
-uint32_t PWM_PERIOD_5V_3V6          =1000;
-uint32_t PWM_PERIOD_5V              =1000;
-uint32_t PWM_PERIOD_3V6             =1000;
+uint32_t PWM_PERIOD_5V_3V6  =1000;
+uint32_t PWM_PERIOD_5V      =1000;
+uint32_t PWM_PERIOD_3V6     =1000;
 uint32_t Period_debug=100;
 uint16_t DUTY=9424;
 uint16_t DUTY_5V=0;
 uint16_t DUTY_3V6=0;
-__IO uint16_t RegularConvData_Tab[2];
+__IO uint16_t RegularConvData_Tab[1];
 __IO int16_t SDADCData_Tab[3];
 
 /* ADC variables */
@@ -125,6 +126,7 @@ float targetVref_mazas=0;
 float AVG_error=0;
 int8_t flag_send=0;
 float Vdd5V_target=5000;
+float Vcc_3v6_target=3580;
 
 /*Flash memory vairables*/
 uint32_t *temp;
@@ -144,6 +146,7 @@ uint8_t flag_tare=0;
 uint8_t flag_koef=0;
 uint8_t flag_TIM3=0;
 uint8_t flag_TIM4=0;
+uint8_t counter_TIM5=0;
 uint8_t flag_toogle=0;
 float naujas_Newton_koef=0;
 uint32_t counter=0;
@@ -182,7 +185,7 @@ float sensor_init(void);
 int16_t get_Newton(int8_t offset_pol, float sensor_mV, float zeroForce_mV, float keof, float temperatura);
 void WriteValuesFLASH(float val1, uint8_t val2, float val3, float val4);
 float SetTARE_and_set_Flash(void);
-
+int8_t error_detection(void);
 
 /* Periptheral function prototypes -------------------------------------------*/
 static uint32_t SDADC1_Config(void);
@@ -199,7 +202,23 @@ void ChangePWM_3v6_duty( uint16_t PULSE );
 void TIM3_IRQHandler(void) ;
 void TIM3_switch (uint8_t status);
 void TIM4_IRQHandler(void) ;
+void TIM5_switch (uint8_t status);
+void TIM5_IRQHandler(void) ;
 
+// Tim5 paleiziamas, kai detektuoja bloga 5V ar 3,6V ar Vref, tada 2s intervalais jis skaiciuoja
+// jeigu bloga itampa po 2s pasidaro gera Timer nusiresetina ir issijungia, jeigu ne, raso klaidos koda
+void TIM5_IRQHandler(void) //error detection timer
+{  
+  if (TIM_GetITStatus(TIM5, TIM_IT_Update) != RESET)
+  {
+    TIM_ClearITPendingBit(TIM5, TIM_IT_Update);
+       
+    counter_TIM5=counter_TIM5+1;
+    if (counter_TIM5==2){
+        counter_TIM5=0;
+        TIM5_switch(0);} // isjungia Timer5
+  }   
+ }
 
 void TIM3_IRQHandler(void) //taravimo ir kalibravimo timer
 {  
@@ -207,7 +226,7 @@ void TIM3_IRQHandler(void) //taravimo ir kalibravimo timer
   {
     TIM_ClearITPendingBit(TIM3, TIM_IT_Update);
     flag_TIM3=1;
-    TIM3_switch(0); // isjungia Timer3
+    TIM3_switch(0); // isjungia Timer3   
   }   
  }
 
@@ -230,8 +249,10 @@ void TIM4_IRQHandler(void) //TIMER4 relaod trigger ,kas 0,7ms
 
 int main(void)
 {
+  /*main variables*/
+  int8_t error_code=0;
+  
   RCC_ClocksTypeDef RCC_Clocks;
-
   /* SysTick end of count event each 1ms */
   RCC_GetClocksFreq(&RCC_Clocks);
   SysTick_Config(RCC_Clocks.HCLK_Frequency / 1000);
@@ -242,7 +263,6 @@ int main(void)
   InitializePWMChannel();
   ADC_init();
   DMA_initSDADC();
- 
   targetVoltagePWM = sensor_init();
 
    //nuskaitymas is flash 
@@ -293,11 +313,11 @@ int main(void)
       measureALL();
       Thermo_targetVpwm=Vrefpwm_thermo( Tempe, targetVoltagePWM);
                   
-/* Feedback control triggered by Tim5*/
+/* Feedback control triggered by Tim4*/
       if ( flag_TIM4==1){
           /*Calculate PWM new DUTY*/
           DUTY_5V = (uint16_t)PI_con_5V(Vdd5V, Vdd5V_target, 10,10);
-          DUTY_3V6= (uint16_t)PI_con_3V6(Vcc_calculated, 3580, 5,10);  // (1)3580, 5,3
+          DUTY_3V6= (uint16_t)PI_con_3V6(Vcc_calculated, Vcc_3v6_target, 5,10);  // (1)3580, 5,3
           DUTY=(uint16_t)PI_controller(AVG_VrefMv,Thermo_targetVpwm,3,10);   //30,0.2   0.6,0.1    10,20   3,10 
 
           /*Pakeicia PWM DUTY*/
@@ -312,6 +332,9 @@ int main(void)
       Newton = get_Newton( offset_poliarumas, AVG_VsensorMv,  zeroForce_mV,  Newton_koef, Tempe);
       Newton_skirtumas=Newton-Prior_Newton;
 
+/* Error detection*/    
+      error_code=error_detection();
+      errorDebug=error_code;
   //-----------------------------------   LIN pradzia   ----------------------------------------------------------
       LIN_TX_data[0]=(Newton & 0x00FF);      //lower  byte 1
       LIN_TX_data[1]=(Newton >> 8)& 0x00FF; //uper byte 1
@@ -385,6 +408,40 @@ int main(void)
   }//end of else
 }// end of main
 
+int8_t error_detection()
+{
+  int8_t error_code=0;
+  
+  /* Is 5V not stable ?  */
+  if ( ((Vdd5V_AVG>Vdd5V_target+5) || (Vdd5V_AVG<Vdd5V_target-5)) && ( (DUTY_5V==PWM_PERIOD_5V)||(DUTY_5V==0) )  ){
+    TIM5_switch(1);      // Ijungia Timer5, ir jeigu 5V po TIM5 vis dar blogas tai error bus detektuotas
+    if (counter_TIM5==1)
+      error_code=11;      //BAD 5V supply
+  }
+  
+   /* Is 3,6V not stable ?  */
+  if ( ((AVG_Vcc_calculated>Vcc_3v6_target+5) || (AVG_Vcc_calculated<Vcc_3v6_target-5)) && ( (DUTY_3V6==PWM_PERIOD_3V6)||(DUTY_3V6==0) )  ){
+    TIM5_switch(1);      // Ijungia Timer5, ir jeigu 5V po TIM5 vis dar blogas tai error bus detektuotas
+    if (counter_TIM5==1)
+      error_code=12;      //BAD 3V6 supply   
+  }  
+  
+     /* Is Vref stable ?  */
+  if ( ((AVG_VrefMv>Thermo_targetVpwm+5) || (AVG_VrefMv<Thermo_targetVpwm-5)) && ( (DUTY==PWM_PERIOD)||(DUTY==0) )  ){
+    TIM5_switch(1);      // Ijungia Timer5, ir jeigu 5V po TIM5 vis dar blogas tai error bus detektuotas
+    if (counter_TIM5==1)
+      error_code=13;      //BAD Vref control    
+  }  
+  
+     /* Is temerature alright ?  */
+  if  ((Tempe>100) || (Tempe<-40)) {
+      error_code=14;      //BAD Temperature  
+  }  
+  
+  
+  return error_code;
+}
+
 int16_t get_Newton(int8_t offset_pol, float sensor_mV, float zeroForce_mV, float Newton_keof, float temperatura)
 { 
   int16_t Newton=0;
@@ -414,7 +471,6 @@ float PI_controller(float value, float target, float Kp, float Ki)
   float error=0;
 
   error=target-value;
-  errorDebug=error;
   if ( ((DUTY<PWM_PERIOD) && (DUTY>0)) && (Ki!=0) ){ //anti windup
     integral = integral + (error)/(time_integral*10);}  // cia Integral time didesnis     
   output= (Kp*error+Ki*integral);
@@ -613,7 +669,6 @@ void measureALL(void)
 {
 /* SAR ADC */
        ADC_3Vref_temp=RegularConvData_Tab[0];  
-       ADC_3V6_divider=RegularConvData_Tab[1]; 
        
 /* 3.6V arba 3.3V maitinimo itampos iskaiciavimas is external 3Vref*/ 
       fixed_step = 2999.1 /(SDADCData_Tab[1]+32768); // priimu kad External 3Vref cia nesikeicia (veliau ji kompensuosiu)
@@ -680,59 +735,6 @@ void measureALL(void)
 
        
 }
-
-void Post_office( float *buffer_float){
-  uint8_t TxBufferIndex = 0;
-  uint8_t temp[2];
-  uint8_t j=0;
-  uint8_t jj=0;
-  int intIRdecimal[2];
-  uint16_t buffer[50];
-  float masyvas[11];
-    for(uint8_t x=0; x<11; x++)
-    {   masyvas[x]=*buffer_float;
-        buffer_float++;
-    }
-      
-  for (uint8_t x=0;x<50;x++)
-      buffer[x]=0xFFF;
-
-  while (masyvas[j]!=0xFFF ){
-    
-    intIRdecimal[0] = (int)masyvas[j];
-    intIRdecimal[1] = ((int)(masyvas[j]*N_DECIMAL_POINTS_PRECISION)%N_DECIMAL_POINTS_PRECISION);
-    
-    for (jj=0; jj<2; jj++){
-      temp[0] = intIRdecimal[jj] & 0xFF;
-      temp[1] = (intIRdecimal[jj] >> 8) & 0xFF;
-  
-      if((temp[0] == 0xFE) || (temp[0] == 0xC0) || (temp[0] == 0xC1)){
-        buffer[TxBufferIndex++] = 0xFE;
-        buffer[TxBufferIndex++] = temp[0];
-      }else{
-        buffer[TxBufferIndex++] = temp[0];  }
-      if((temp[1] == 0xFE) || (temp[1] == 0xC0) || (temp[1] == 0xC1)){
-         buffer[TxBufferIndex++] = 0xFE;
-        buffer[TxBufferIndex++] = temp[1];
-      }else{
-        buffer[TxBufferIndex++] = temp[1];  } 
-     }
-    j=j+1;
-  }
-    
-  while(USART_GetFlagStatus(USART2, USART_FLAG_TXE) == RESET);
-    USART_SendData(USART2, 0xC0);
-    
-  TxBufferIndex=0;
-  while(buffer[TxBufferIndex] != 0xFFF){
-    while(USART_GetFlagStatus(USART2, USART_FLAG_TXE) == RESET);
-    USART_SendData(USART2, buffer[TxBufferIndex]);
-    TxBufferIndex++;
-  }  
-  while(USART_GetFlagStatus(USART2, USART_FLAG_TXE) == RESET);
-    USART_SendData(USART2, 0xC1);
-}
-
 
 float termocompensation(float ADC_temperature){ //is ADC_temp gauna internal Vref itampa mV
     float result;
@@ -1239,7 +1241,7 @@ void ADC_init( )
   DMA_InitStructure.DMA_PeripheralBaseAddr = (uint32_t)ADC1_DR_Address;
   DMA_InitStructure.DMA_MemoryBaseAddr = (uint32_t)RegularConvData_Tab;
   DMA_InitStructure.DMA_DIR = DMA_DIR_PeripheralSRC;
-  DMA_InitStructure.DMA_BufferSize = 2;
+  DMA_InitStructure.DMA_BufferSize = 1;
   DMA_InitStructure.DMA_PeripheralInc = DMA_PeripheralInc_Disable;
   DMA_InitStructure.DMA_MemoryInc = DMA_MemoryInc_Enable;
   DMA_InitStructure.DMA_PeripheralDataSize = DMA_PeripheralDataSize_HalfWord;
@@ -1268,7 +1270,7 @@ void ADC_init( )
   ADC_InitStructure.ADC_ContinuousConvMode = ENABLE;
   ADC_InitStructure.ADC_ExternalTrigConv = ADC_ExternalTrigConv_None;
   ADC_InitStructure.ADC_DataAlign = ADC_DataAlign_Right;
-  ADC_InitStructure.ADC_NbrOfChannel = 2;
+  ADC_InitStructure.ADC_NbrOfChannel = 1;
   ADC_Init(ADC1, &ADC_InitStructure);
   
   /* Convert the ADC1 Channel 9 with 55.5 Cycles as sampling time */ 
@@ -1276,11 +1278,7 @@ void ADC_init( )
   /* Vtemperature */ 
  // ADC_RegularChannelConfig(ADC1, ADC_Channel_TempSensor, 2, ADC_SampleTime_239Cycles5);
     /*Temperatura from 3V reference PA0*/ 
-  ADC_RegularChannelConfig(ADC1, ADC_Channel_0, 1, ADC_SampleTime_239Cycles5);
-    /*3V6 votlage control PA1*/ 
-  ADC_RegularChannelConfig(ADC1, ADC_Channel_1, 2, ADC_SampleTime_239Cycles5);
-  
-  ADC_TempSensorVrefintCmd(ENABLE);
+  ADC_RegularChannelConfig(ADC1, ADC_Channel_0, 0, ADC_SampleTime_239Cycles5);
     
   /* Enable ADC1 */
   ADC_Cmd(ADC1, ENABLE);  
@@ -1326,14 +1324,7 @@ void GPIO_init(){
    GPIO_InitStructure.GPIO_Mode = GPIO_Mode_AF;
    GPIO_InitStructure.GPIO_Speed = GPIO_Speed_50MHz;
    GPIO_Init(GPIOA, &GPIO_InitStructure);  
-   
-  //PWM pin 3.6V
-   RCC_AHBPeriphClockCmd(RCC_AHBPeriph_GPIOB, ENABLE);
-   GPIO_InitStructure.GPIO_Pin = GPIO_Pin_3;
-   GPIO_InitStructure.GPIO_Mode = GPIO_Mode_AF;
-   GPIO_InitStructure.GPIO_Speed = GPIO_Speed_50MHz;
-   GPIO_Init(GPIOB, &GPIO_InitStructure);   
-   
+      
    //PWM pin 3.6V 2 dublis
    RCC_AHBPeriphClockCmd(RCC_AHBPeriph_GPIOA, ENABLE);
    GPIO_InitStructure.GPIO_Pin = GPIO_Pin_1;
@@ -1350,7 +1341,7 @@ void GPIO_init(){
   GPIO_InitStructure.GPIO_PuPd = GPIO_PuPd_NOPULL;
   GPIO_Init(GPIOB, &GPIO_InitStructure);
   
-    //SAR ADC pins PA0 and PA1
+    //SAR ADC pins PA0
    RCC_AHBPeriphClockCmd(RCC_AHBPeriph_GPIOA, ENABLE);
    GPIO_InitStructure.GPIO_Pin = GPIO_Pin_0;
    GPIO_InitStructure.GPIO_Mode = GPIO_Mode_AN;
@@ -1370,7 +1361,7 @@ void GPIO_init(){
 
 void InitializeTimer(uint32_t PERIOD, uint32_t PERIOD_5V, uint32_t PERIOD_3V6 )
 {          
-    // Timer for Vref pwm
+    // Timer4 for Vref pwm
     // Cycle timer interrupt 
     NVIC_InitStructure.NVIC_IRQChannel = TIM4_IRQn;
     NVIC_InitStructure.NVIC_IRQChannelPreemptionPriority = 1;
@@ -1391,7 +1382,7 @@ void InitializeTimer(uint32_t PERIOD, uint32_t PERIOD_5V, uint32_t PERIOD_3V6 )
     TIM_ITConfig(TIM4, TIM_IT_Update, ENABLE);
     TIM_Cmd(TIM4, ENABLE);
     
-    //Timer for 5V and for 3.6V control
+    //Timer2 for 5V and for 3.6V control
     RCC_APB1PeriphClockCmd(RCC_APB1Periph_TIM2, ENABLE);
 
     timerInitStructure.TIM_Prescaler = 0;
@@ -1414,13 +1405,33 @@ void InitializeTimer(uint32_t PERIOD, uint32_t PERIOD_5V, uint32_t PERIOD_3V6 )
     /* APB1 72MHz */
     RCC_APB1PeriphClockCmd(RCC_APB1Periph_TIM3, ENABLE);
 
-    timerInitStructure.TIM_Prescaler = 36000-1; 
+    timerInitStructure.TIM_Prescaler = 36000-1;  //36000-1
     timerInitStructure.TIM_CounterMode = TIM_CounterMode_Up; // Skaiciuoti i pliusa
-    timerInitStructure.TIM_Period = 10000; // Periodos 
+    timerInitStructure.TIM_Period = 7000*2; // Periodos    7s (7s ->7000*2)
     timerInitStructure.TIM_ClockDivision = TIM_CKD_DIV1;
     timerInitStructure.TIM_RepetitionCounter = 0;
     TIM_TimeBaseInit(TIM3, &timerInitStructure);
 //    TIM3_switch(1);
+    
+ /************ TIMER5 skirtas error detection*********/
+       /* Cycle timer interrupt */
+    NVIC_InitStructure.NVIC_IRQChannel = TIM5_IRQn;
+    NVIC_InitStructure.NVIC_IRQChannelPreemptionPriority = 3;
+    NVIC_InitStructure.NVIC_IRQChannelSubPriority=3;
+    NVIC_InitStructure.NVIC_IRQChannelCmd = ENABLE;
+    NVIC_Init(&NVIC_InitStructure);
+
+    /* timer controlling step frequency */
+    /* APB1 72MHz */
+    RCC_APB1PeriphClockCmd(RCC_APB1Periph_TIM5, ENABLE);
+
+    timerInitStructure.TIM_Prescaler = 36000-1;//72000-1; 
+    timerInitStructure.TIM_CounterMode = TIM_CounterMode_Up; // Skaiciuoti i pliusa
+    timerInitStructure.TIM_Period = 2000*2; // Periodos   2sec (2s ->2000*2)
+    timerInitStructure.TIM_ClockDivision = TIM_CKD_DIV1;
+    timerInitStructure.TIM_RepetitionCounter = 0;
+    TIM_TimeBaseInit(TIM5, &timerInitStructure);
+    TIM5_switch(1);
     
 }
 
@@ -1473,6 +1484,18 @@ void TIM3_switch (uint8_t status){
       }else if(status == 0){
         TIM_ITConfig(TIM3, TIM_IT_Update, DISABLE);
         TIM_Cmd(TIM3, DISABLE);
+      }
+}
+
+void TIM5_switch (uint8_t status){
+  
+    if(status == 1){
+        TIM_ClearITPendingBit(TIM5, TIM_IT_Update);
+        TIM_ITConfig(TIM5, TIM_IT_Update, ENABLE);
+        TIM_Cmd(TIM5, ENABLE);
+      }else if(status == 0){
+        TIM_ITConfig(TIM5, TIM_IT_Update, DISABLE);
+        TIM_Cmd(TIM5, DISABLE);
       }
 }
 
